@@ -31,10 +31,11 @@ that only echoes messages.
 - [x] `Cfg.Root` holds the config file's directory. Join it with each cleaned `sync` path
       to get the real location, instead of using the working directory.
 - [x] Tests in `internal/config/config_test.go`.
-- [ ] Check that `ignore.paths` patterns are valid with `doublestar.ValidatePattern` when
-      adding `doublestar` in step 6.
-- [ ] Resolve symlinks before touching files in steps 6–9. The `sync` path check only looks
-      at the text of the path, so a symlink inside the project could still lead outside it.
+- [x] Check that `ignore.paths` patterns are valid. `project.Load` does this with
+      `doublestar.ValidatePattern`.
+- [x] Stop symlinks leading outside the project when reading. `project.Load` uses
+      `os.OpenRoot` and doesn't follow symlinks inside sync folders.
+- [ ] Use `os.OpenRoot` for the file changes in steps 8 and 9 as well.
 
 ### 3. Use the config in `serve`
 
@@ -58,22 +59,23 @@ that only echoes messages.
 
 ### 6. Add `internal/project` (disk → tree)
 
-- [ ] Make the decisions in [Decisions to make](#decisions-to-make) first.
-- [ ] Build the mounts. Add the DataModel with `sync: false`, each parent on the way to
+- [x] Build the mounts. Add the DataModel with `sync: false`, each parent on the way to
       a target with `sync: false`, and each `sync` target with `sync: true`. For
       `StarterPlayer/StarterPlayerScripts`, that means `StarterPlayer` is `false` and
       `StarterPlayerScripts` is `true`.
-- [ ] Generate a new Ref for each instance read from disk. `google/uuid` works for this.
-- [ ] Always use non-nil slices for `Mount.Path`, `Snapshot.Mounts` and
-      `Snapshot.Instances`. A nil slice encodes as `null`, and the plugin rejects a
-      snapshot whose `mounts` or `instances` isn't a list.
-- [ ] Read each `sync` path into instances. Skip whatever matches `ignore.paths`, using
+- [x] Generate a new Ref for each instance read from disk, using the standard library's
+      `uuid` package.
+- [x] Read each `sync` path into instances. Skip whatever matches `ignore.paths`, using
       `doublestar`.
-- [ ] Filter `ignore.instances` and `ignore.classes` out of the snapshot. The plugin only
+- [x] Filter `ignore.instances` and `ignore.classes` out of the snapshot. The plugin only
       applies them to what's in Studio, so it would still create an ignored instance
       that the snapshot contains.
 
 ### 7. Add `internal/session` and the handshake
+
+- [ ] Always use non-nil slices for `Mount.Path`, `Snapshot.Mounts` and
+      `Snapshot.Instances`. A nil slice encodes as `null`, and the plugin rejects a
+      snapshot whose `mounts` or `instances` isn't a list.
 
 - [ ] Let one goroutine own the tree. Connections and the file watcher send it events
       over channels. This avoids locks and gives the server one order for changes.
@@ -132,7 +134,7 @@ Studio and gives it a new Ref. That's fine at first. Detecting real renames can 
 ### 10. Finish
 
 - [ ] Write non-script instances and properties to disk (see below).
-- [ ] Add a `verde init` command that generates `project.yml`.
+- [x] Add a `verde init` command that generates `project.yml`.
 - [ ] Add end-to-end Go tests that connect as a plugin and check the messages and files.
 - [ ] Run the manual Studio checks in `README.md`.
 - [ ] Test large projects. Roblox doesn't document a message size limit, so big snapshots
@@ -143,7 +145,7 @@ Studio and gives it a new Ref. That's fine at first. Detecting real renames can 
 | Decision | Suggestion |
 |---|---|
 | How classes map to files | Use `.server.luau` for `Script`, `.client.luau` for `LocalScript`, `.luau` for `ModuleScript`, and directories for `Folder` |
-| A script with children | Use a directory containing `init.server.luau`, `init.client.luau` or `init.luau` |
+| A script with children | Use a directory containing `index.server.luau`, `index.client.luau` or `index.luau` |
 | Non-script instances | Keep them in memory first, then store them as JSON files. Until then, they stop syncing after a server restart |
 | Siblings with the same name | Add a stable suffix to the file name and store the real name inside. Studio allows many children named `Part`, but they can't share a path |
 | Empty `placeIds` | Allow any place |

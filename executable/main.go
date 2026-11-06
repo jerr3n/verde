@@ -3,53 +3,39 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
-	"time"
 
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/jerr3n/verde/executable/internal/config"
 	"github.com/jerr3n/verde/executable/internal/logging"
+	"github.com/jerr3n/verde/executable/internal/project"
+	"github.com/jerr3n/verde/executable/internal/session"
 	"github.com/urfave/cli/v3"
 	"go.uber.org/zap"
 )
 
-func handleWs(c *gin.Context) {
-	conn, err := websocket.Accept(c.Writer, c.Request, nil)
+func serve(ctx context.Context, logger *zap.Logger, cfg *config.Cfg) error {
+	tree, mnts, err := project.Load(cfg)
 	if err != nil {
-		log.Printf("websocket upgrade: %v", err)
-		return
+		return err
 	}
-	defer conn.CloseNow()
+	s := session.New(cfg, tree, mnts, logger)
+	go s.Run(ctx)
 
-	ctx := c.Request.Context()
-
-	for {
-		messageType, message, err := conn.Read(ctx)
+	handleWs := func(c *gin.Context) {
+		conn, err := websocket.Accept(c.Writer, c.Request, nil)
 		if err != nil {
-			status := websocket.CloseStatus(err)
-			if status != websocket.StatusNormalClosure &&
-				status != websocket.StatusGoingAway {
-				log.Printf("websocket read: %v", err)
-			}
+			logger.Warn("websocket upgrade", zap.Error(err))
 			return
 		}
+		defer conn.CloseNow()
 
-		log.Printf("received: %s", message)
-
-		writeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		err = conn.Write(writeCtx, messageType, message)
-		cancel()
-
-		if err != nil {
-			log.Printf("websocket write: %v", err)
-			return
+		if err := s.Handle(c.Request.Context(), conn); err != nil {
+			logger.Warn("websocket connection", zap.Error(err))
 		}
 	}
-}
 
-func serve(logger *zap.Logger, addr string) error {
 	gin.DebugPrintRouteFunc = logging.RouteLogger(logger)
 
 	r := gin.New()
@@ -68,8 +54,8 @@ func serve(logger *zap.Logger, addr string) error {
 
 	r.GET("/ws", handleWs)
 
-	logger.Info("listening", zap.String("addr", addr))
-	return r.Run(addr)
+	logger.Info("listening", zap.String("addr", cfg.Addr()))
+	return r.Run(cfg.Addr())
 }
 
 func main() {
@@ -84,13 +70,24 @@ func main() {
 		EnableShellCompletion: true,
 		Commands: []*cli.Command{
 			{
+				Name:  "init",
+				Usage: "create a " + config.DefaultPath + " in the current folder",
+				Action: func(ctx context.Context, command *cli.Command) error {
+					if err := config.Init(config.DefaultPath); err != nil {
+						return err
+					}
+					fmt.Printf("Created %s. Run `verde serve` to start syncing.\n", config.DefaultPath)
+					return nil
+				},
+			},
+			{
 				Name: "serve",
 				Action: func(ctx context.Context, command *cli.Command) error {
 					cfg, err := config.Load(config.DefaultPath)
 					if err != nil {
 						return err
 					}
-					return serve(logger, cfg.Addr())
+					return serve(ctx, logger, cfg)
 				},
 			},
 		},

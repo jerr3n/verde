@@ -71,12 +71,12 @@ func main() {
 		Commands: []*cli.Command{
 			{
 				Name:  "init",
-				Usage: "create a " + config.DefaultPath + " in the current folder",
+				Usage: "create a " + config.DefaultPath + " and its sync folders in the current folder",
 				Action: func(ctx context.Context, command *cli.Command) error {
 					if err := config.Init(config.DefaultPath); err != nil {
 						return err
 					}
-					fmt.Printf("Created %s. Run `verde serve` to start syncing.\n", config.DefaultPath)
+					fmt.Printf("Created %s and its sync folders. Run `verde serve` to start syncing.\n", config.DefaultPath)
 					return nil
 				},
 			},

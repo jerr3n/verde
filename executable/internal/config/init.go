@@ -44,9 +44,43 @@ conflicts:
   onConnect: disk # disk | studio | interactive
 `
 
-// Init writes a new config file at path, named after the folder it's in. If the file
-// already exists, it's left untouched and the error matches fs.ErrExist.
+// Init writes a new config file at path, named after the folder it's in, and creates
+// its sync folders. Folders that already exist are left as they are. If the file
+// already exists, nothing changes and the error matches fs.ErrExist.
 func Init(path string) error {
+	if err := writeInitFile(path); err != nil {
+		return err
+	}
+	if err := makeSyncFolders(path); err != nil {
+		os.Remove(path) // So that `verde init` can run again once this is fixed.
+		return err
+	}
+	return nil
+}
+
+// makeSyncFolders creates every sync folder in the config at path. os.Root refuses
+// anything that leaves the project, including through symlinks.
+func makeSyncFolders(path string) error {
+	cfg, err := Load(path)
+	if err != nil {
+		return err
+	}
+
+	root, err := os.OpenRoot(cfg.Root)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+
+	for _, entry := range cfg.Sync {
+		if err := root.MkdirAll(entry.Path, 0o755); err != nil {
+			return fmt.Errorf("create %s: %w", entry.Path, err)
+		}
+	}
+	return nil
+}
+
+func writeInitFile(path string) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Errorf("resolve %s: %w", path, err)

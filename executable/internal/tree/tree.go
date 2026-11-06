@@ -40,6 +40,7 @@ var (
 type node struct {
 	inst     protocol.Instance
 	children []Ref
+	fileless bool // should have a file but doesn't, so disk says nothing about it
 }
 
 // Tree is the set of synced instances. Create one with New.
@@ -71,6 +72,48 @@ func (t *Tree) Get(id Ref) (protocol.Instance, bool) {
 		return protocol.Instance{}, false
 	}
 	return clone(n.inst), true
+}
+
+// lists an instance's children, in order
+func (t *Tree) Children(id Ref) []Ref {
+	n, ok := t.nodes[id]
+	if !ok {
+		return nil
+	}
+	return slices.Clone(n.children)
+}
+
+// SetFileless records whether an instance is missing a file it would normally have, such
+// as a second Script with the same name, or one whose write failed. Diff leaves these
+// alone: not finding the file doesn't mean it was deleted, and an older file with the
+// same name doesn't mean its contents changed.
+func (t *Tree) SetFileless(id Ref, fileless bool) {
+	if n, ok := t.nodes[id]; ok {
+		n.fileless = fileless
+	}
+}
+
+// reports whether an instance is marked fileless
+func (t *Tree) IsFileless(id Ref) bool {
+	n, ok := t.nodes[id]
+	return ok && n.fileless
+}
+
+// lists every fileless instance, parents first
+func (t *Tree) Fileless() []Ref {
+	var out []Ref
+	var visit func(id Ref)
+	visit = func(id Ref) {
+		n := t.nodes[id]
+		if n.fileless {
+			out = append(out, id)
+		}
+		for _, child := range n.children {
+			visit(child)
+		}
+	}
+	visit(t.root)
+	return out
 }
 
 // adds instance as last child of its parent

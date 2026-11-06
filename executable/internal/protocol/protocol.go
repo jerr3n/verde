@@ -72,6 +72,11 @@ type Patch struct {
 	Removed []Ref      `json:"removed,omitempty"`
 }
 
+// Empty reports whether a patch changes nothing
+func (p Patch) Empty() bool {
+	return len(p.Added)+len(p.Updated)+len(p.Removed) == 0
+}
+
 // Ack acknowledge
 type Ack struct {
 	Seq int64 `json:"seq"`

@@ -63,7 +63,8 @@ Applying a change can yield, so a single loop keeps patches from interleaving.
 The plugin matches the snapshot against Studio by parent, name and class. Matching
 is what stops every connect from creating duplicates, and it's why Refs don't have
 to survive a server restart. `onConnect` then decides who wins. PROTOCOL.md has the
-table. Nothing on disk is deleted without asking.
+table. Connecting never removes files without asking. When a change in Studio does
+remove one, the server moves it to `.verde/trash` instead of deleting it.
 
 ### Detecting changes
 

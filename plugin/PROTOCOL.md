@@ -35,7 +35,7 @@ that only echoes messages.
       `doublestar.ValidatePattern`.
 - [x] Stop symlinks leading outside the project when reading. `project.Load` uses
       `os.OpenRoot` and doesn't follow symlinks inside sync folders.
-- [ ] Use `os.OpenRoot` for the file changes in steps 8 and 9 as well.
+- [x] Use `os.OpenRoot` for the file changes in step 8 as well.
 
 ### 3. Use the config in `serve`
 
@@ -96,20 +96,18 @@ that only echoes messages.
 
 For each `patch` from the plugin:
 
-- [ ] Apply `added`, then `updated`, then `removed`.
-- [ ] Accept any class and any property. Scripts are only special because `Source`
+- [x] Apply `added`, then `updated`, then `removed`.
+- [x] Accept any class and any property. Scripts are only special because `Source`
       reaches a file.
-- [ ] Keep everything in the tree, even what can't reach disk yet.
-- [ ] Update the tree, then write the file. Write to a temporary file and rename it, so a
+- [x] Keep everything in the tree, even what can't reach disk yet.
+- [x] Update the tree, then write the file. Write to a temporary file and rename it, so a
       crash can't leave half a script.
-- [ ] Handle renames and moves, including every path under a moved folder.
-- [ ] Handle `removed` by deleting the files for that subtree. Consider moving them to a
-      trash folder at first, since this destroys real work.
-- [ ] Never build a path directly from an instance name. Names come from the client, so
-      `../../x`, `/`, and names that are invalid on Windows or macOS must be encoded or
-      rejected.
-- [ ] Forward the patch to every other connected plugin, but not to the sender.
-- [ ] If a write fails, log it and send `error`. The plugin only warns and doesn't undo
+- [x] Handle renames and moves, including every path under a moved folder.
+- [x] Handle `removed` by moving the files for that subtree to `.verde/trash`.
+- [x] Never build a path directly from an instance name. Names are percent-encoded (see
+      [Names on disk](#names-on-disk)).
+- [x] Forward the patch to every other connected plugin, but not to the sender.
+- [x] If a write fails, log it and send `error`. The plugin only warns and doesn't undo
       anything, so the two sides now differ until the user reconnects.
 
 **Milestone:** edit, rename, add and delete in Studio, and see the files change.
@@ -146,13 +144,34 @@ Studio and gives it a new Ref. That's fine at first. Detecting real renames can 
 |---|---|
 | How classes map to files | Use `.server.luau` for `Script`, `.client.luau` for `LocalScript`, `.luau` for `ModuleScript`, and directories for `Folder` |
 | A script with children | Use a directory containing `index.server.luau`, `index.client.luau` or `index.luau` |
-| Non-script instances | Keep them in memory first, then store them as JSON files. Until then, they stop syncing after a server restart |
-| Siblings with the same name | Add a stable suffix to the file name and store the real name inside. Studio allows many children named `Part`, but they can't share a path |
+| Non-script instances | Kept in memory for now, along with any scripts inside them. Later, store them as JSON files. Until then, they stop syncing after a server restart |
+| Siblings with the same name | The first gets the file, and the others stay in memory with a warning until the name is free. Later, add a stable suffix to the file name and store the real name inside. Studio allows many children named `Part`, but they can't share a path |
 | Empty `placeIds` | Allow any place |
 | `placeId` 0 (unpublished place) | Allow it only when `placeIds` is empty |
 
 The plugin matches same-named siblings by name and class, in the order they're listed.
 Keep that order stable between connects, or their properties can get swapped.
+
+## Names on disk
+
+Instance names can hold anything, so `project.Apply` percent-encodes what isn't safe in a
+file name and scans decode it. These all come back as the same name:
+
+| Encoded | Why |
+|---|---|
+| `% / \ : * ? " < > \|` and control characters | Not allowed in file names on some systems, or would change the path |
+| A leading `.` | Would hide the file, and could make `.git` |
+| A trailing `.` or space | Windows drops them |
+| A trailing `.server` or `.client` | A ModuleScript called `x.server` would read back as a Script called `x` |
+| `index` | `index.luau` means "the script of this folder" |
+| `CON`, `NUL`, `COM1` and the like | Reserved on Windows |
+
+An instance that should have a file but can't is marked *fileless*: it stays in the tree
+and the snapshot, and scans leave it alone. Otherwise, a scan would take the missing file
+as a deletion and remove it from Studio, or send an older file's text over an edit. This
+covers siblings whose names match (ignoring case, for Windows and macOS), matches for
+`ignore`, a script whose folder name is taken, and failed writes. Each patch and each scan
+that changes something tries again. The user gets one `error` per instance.
 
 ## Wire protocol
 
@@ -424,3 +443,6 @@ type Error struct {
   goroutine gives one order for changes, but fixing this also needs a way for the plugin
   to recognise that order. The protocol doesn't have one yet.
 - **Message size:** very large snapshots and patches are untested.
+- **Empty names:** `updated` can't express a rename to an empty name, since a missing
+  `name` and an empty one look the same. The server keeps the old name.
+- **The trash is never emptied:** `.verde/trash` keeps growing until someone deletes it.

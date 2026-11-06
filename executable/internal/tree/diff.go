@@ -11,9 +11,9 @@ type sibling struct {
 	name, class string
 }
 
-// reports whether a class can exist on disk. Others are only in the tree, so a scan
-// not finding them doesn't mean they were deleted
-func onDisk(class string) bool {
+// OnDisk reports whether a class can exist on disk. Others are only in the tree, so a
+// scan not finding them doesn't mean they were deleted
+func OnDisk(class string) bool {
 	switch class {
 	case "Script", "LocalScript", "ModuleScript", "Folder":
 		return true
@@ -59,7 +59,12 @@ func Diff(cur, next *Tree) protocol.Patch {
 		existing := map[sibling]Ref{}
 		for _, id := range cur.nodes[curID].children {
 			inst := cur.nodes[id].inst
-			existing[sibling{inst.Name, inst.Class}] = id
+			key := sibling{inst.Name, inst.Class}
+			// Same-named siblings share one file, which belongs to the one that isn't fileless.
+			prev, taken := existing[key]
+			if !taken || (cur.nodes[prev].fileless && !cur.nodes[id].fileless) {
+				existing[key] = id
+			}
 		}
 		for _, id := range next.nodes[nextID].children {
 			inst := next.nodes[id].inst
@@ -71,13 +76,16 @@ func Diff(cur, next *Tree) protocol.Patch {
 				continue
 			}
 			delete(existing, key)
+			if cur.nodes[match].fileless {
+				continue // whatever's on disk isn't this instance's file
+			}
 			if props := changedProps(cur.nodes[match].inst.Props, inst.Props); len(props) > 0 {
 				p.Updated = append(p.Updated, protocol.Update{ID: match, Props: props})
 			}
 			walk(match, id)
 		}
 		for key, id := range existing { // on the tree but no longer on disk
-			if onDisk(key.class) {
+			if OnDisk(key.class) && !cur.nodes[id].fileless {
 				p.Removed = append(p.Removed, id)
 			}
 		}

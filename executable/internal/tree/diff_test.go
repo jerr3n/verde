@@ -211,3 +211,57 @@ func TestDiffApplyConverges(t *testing.T) {
 	}
 	assertPatch(t, Diff(cur, next), protocol.Patch{})
 }
+
+func TestDiffLeavesFilelessInstanceAlone(t *testing.T) {
+	build := func(root Ref) *Tree {
+		return buildTree(t, root,
+			protocol.Instance{ID: root + "rs", Parent: root, Name: "ReplicatedStorage", Class: "ReplicatedStorage"},
+		)
+	}
+
+	t.Run("missing from disk isn't a deletion", func(t *testing.T) {
+		cur := build("game")
+		cur.Insert(protocol.Instance{ID: "a", Parent: "gamers", Name: "A", Class: "ModuleScript", Props: source("x")})
+		cur.SetFileless("a", true)
+
+		assertPatch(t, Diff(cur, build("game2")), protocol.Patch{})
+	})
+
+	t.Run("a file with its name isn't its file", func(t *testing.T) {
+		cur := build("game")
+		cur.Insert(protocol.Instance{ID: "a", Parent: "gamers", Name: "A", Class: "ModuleScript", Props: source("mine")})
+		cur.SetFileless("a", true)
+		next := build("game2")
+		next.Insert(protocol.Instance{ID: "a2", Parent: "game2rs", Name: "A", Class: "ModuleScript", Props: source("older")})
+
+		assertPatch(t, Diff(cur, next), protocol.Patch{})
+	})
+
+	t.Run("its children aren't deleted either", func(t *testing.T) {
+		cur := build("game")
+		cur.Insert(protocol.Instance{ID: "dir", Parent: "gamers", Name: "dir", Class: "Folder"})
+		cur.Insert(protocol.Instance{ID: "kid", Parent: "dir", Name: "Kid", Class: "ModuleScript", Props: source("x")})
+		cur.SetFileless("dir", true)
+		next := build("game2")
+		next.Insert(protocol.Instance{ID: "dir2", Parent: "game2rs", Name: "dir", Class: "Folder"})
+
+		assertPatch(t, Diff(cur, next), protocol.Patch{})
+	})
+}
+
+func TestDiffSameNameSiblingsMatchTheOneWithTheFile(t *testing.T) {
+	for _, order := range [][]Ref{{"withFile", "without"}, {"without", "withFile"}} {
+		cur := buildTree(t, "game", protocol.Instance{ID: "rs", Parent: "game", Name: "R", Class: "R"})
+		for _, id := range order {
+			cur.Insert(protocol.Instance{ID: id, Parent: "rs", Name: "Dup", Class: "ModuleScript", Props: source(string(id))})
+		}
+		cur.SetFileless("without", true)
+
+		next := buildTree(t, "game2", protocol.Instance{ID: "rs2", Parent: "game2", Name: "R", Class: "R"})
+		next.Insert(protocol.Instance{ID: "dup2", Parent: "rs2", Name: "Dup", Class: "ModuleScript", Props: source("edited")})
+
+		assertPatch(t, Diff(cur, next), protocol.Patch{
+			Updated: []protocol.Update{{ID: "withFile", Props: source("edited")}},
+		})
+	}
+}

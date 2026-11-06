@@ -60,9 +60,10 @@ const (
 type OnConnect string
 
 const (
-	OnConnectDisk        OnConnect = "disk"
-	OnConnectStudio      OnConnect = "studio"
-	OnConnectInteractive OnConnect = "interactive"
+	OnConnectDisk          OnConnect = "disk"
+	OnConnectStudio        OnConnect = "studio"
+	OnConnectInteractive   OnConnect = "interactive"
+	OnConnectBidirectional OnConnect = "bidirectional"
 )
 
 type SyncInstance struct {

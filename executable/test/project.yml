@@ -28,4 +28,4 @@ ignore:
   instances: ["Workspace/Camera", "Workspace/Terrain"]
   
 conflicts:
-  onConnect: disk # disk | studio | interactive
+  onConnect: disk # disk | studio | interactive | bidirectional

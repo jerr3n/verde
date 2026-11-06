@@ -96,7 +96,7 @@ sync:
 }
 
 func TestLoadAcceptsEachOnConnect(t *testing.T) {
-	for _, value := range []OnConnect{OnConnectDisk, OnConnectStudio, OnConnectInteractive} {
+	for _, value := range []OnConnect{OnConnectDisk, OnConnectStudio, OnConnectInteractive, OnConnectBidirectional} {
 		t.Run(string(value), func(t *testing.T) {
 			cfg, err := Load(writeConfig(t, "serve: {port: 1234}\nconflicts: {onConnect: "+string(value)+"}\n"+validSync))
 			if err != nil {

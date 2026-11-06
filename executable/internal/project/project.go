@@ -8,7 +8,8 @@
 //	lib/                     Folder
 //	Shop/index.server.luau   Shop, as a Script whose children are the rest of Shop/
 //
-// Other files are skipped.
+// Other files are skipped. Names that aren't safe as file names are percent-encoded
+// (see encodeName). Load reads this mapping from disk, and Apply writes it.
 package project
 
 import (
@@ -77,16 +78,28 @@ func newRef() protocol.Ref {
 // script. It stops at the first matching suffix, because ".luau" also matches the
 // other two.
 func classify(filename string) (name, class string, ok bool) {
-	for _, kind := range []struct{ suffix, class string }{
-		{".server.luau", "Script"},
-		{".client.luau", "LocalScript"},
-		{".luau", "ModuleScript"},
-	} {
+	for _, kind := range scriptKinds {
 		if name, found := strings.CutSuffix(filename, kind.suffix); found {
 			return name, kind.class, name != ""
 		}
 	}
 	return "", "", false
+}
+
+var scriptKinds = []struct{ suffix, class string }{
+	{".server.luau", "Script"},
+	{".client.luau", "LocalScript"},
+	{".luau", "ModuleScript"},
+}
+
+// scriptSuffix returns the file suffix for a script class, or "" for anything else.
+func scriptSuffix(class string) string {
+	for _, kind := range scriptKinds {
+		if kind.class == class {
+			return kind.suffix
+		}
+	}
+	return ""
 }
 
 // isIndex reports whether a file is the script of the folder it's in. It's
@@ -212,7 +225,7 @@ func (l *loader) loadChildren(dir, instancePath string, parent protocol.Ref) err
 		}
 
 		if entry.IsDir() {
-			err = l.loadDir(full, entry.Name(), instancePath, parent)
+			err = l.loadDir(full, decodeName(entry.Name()), instancePath, parent)
 		} else {
 			err = l.loadFile(full, entry.Name(), instancePath, parent)
 		}
@@ -257,6 +270,7 @@ func (l *loader) loadFile(full, filename, instancePath string, parent protocol.R
 	if !ok || isIndex(filename) {
 		return nil
 	}
+	name = decodeName(name)
 	if l.instanceIgnored(instancePath+"/"+name, class) {
 		return nil
 	}

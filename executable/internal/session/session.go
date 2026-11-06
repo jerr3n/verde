@@ -152,7 +152,7 @@ func (s *session) handleMessage(c *client, data []byte) {
 			c.sendError(env.Seq, "patch sent before hello")
 			return
 		}
-		s.logger.Info("received patch, not applied yet") // step 8 goes here
+		s.handlePatch(c, env)
 	case "ack", "error":
 		// Nothing to do for now.
 	default:
@@ -195,6 +195,35 @@ func (s *session) handleHello(c *client, e protocol.Envelope) {
 	s.clients[c] = struct{}{}
 }
 
+// handlePatch applies a patch from a plugin to the tree and disk, then forwards what
+// was applied to the other plugins. The sender already has these changes, and the
+// rescan its file writes cause finds nothing different, so nothing echoes back.
+func (s *session) handlePatch(c *client, e protocol.Envelope) {
+	var patch protocol.Patch
+	if err := json.Unmarshal(e.Data, &patch); err != nil {
+		c.sendError(e.Seq, "patch is not valid")
+		return
+	}
+
+	applied, errs := project.Apply(s.cfg, s.t, s.mounts, patch)
+	for _, err := range errs {
+		s.logger.Warn("apply plugin patch", zap.Error(err))
+		c.sendError(e.Seq, err.Error())
+	}
+	if applied.Empty() {
+		return
+	}
+
+	for other := range s.clients {
+		if other == c {
+			continue
+		}
+		if err := other.send("patch", applied); err != nil {
+			s.logger.Warn("forward patch", zap.Error(err))
+		}
+	}
+}
+
 func (s *session) handleDiskChange() {
 	next, _, err := project.Load(s.cfg)
 	if err != nil {
@@ -203,7 +232,7 @@ func (s *session) handleDiskChange() {
 	}
 
 	patch := tree.Diff(s.t, next)
-	if len(patch.Added)+len(patch.Updated)+len(patch.Removed) == 0 {
+	if patch.Empty() {
 		return
 	}
 
@@ -216,6 +245,11 @@ func (s *session) handleDiskChange() {
 		if err := c.send("patch", patch); err != nil {
 			s.logger.Warn("send patch", zap.Error(err))
 		}
+	}
+
+	// A file this removed may have been what kept an instance fileless.
+	if _, errs := project.Apply(s.cfg, s.t, s.mounts, protocol.Patch{}); len(errs) > 0 {
+		s.logger.Warn("retry writes", zap.Errors("errors", errs))
 	}
 }
 

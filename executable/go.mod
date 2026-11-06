@@ -5,6 +5,7 @@ go 1.27.1
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.4
 	github.com/coder/websocket v1.8.15
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/gin-gonic/gin v1.12.0
 	github.com/urfave/cli/v3 v3.14.0
 	go.uber.org/zap v1.28.0

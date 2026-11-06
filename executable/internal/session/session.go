@@ -10,6 +10,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/jerr3n/verde/executable/internal/config"
+	"github.com/jerr3n/verde/executable/internal/project"
 	"github.com/jerr3n/verde/executable/internal/protocol"
 	"github.com/jerr3n/verde/executable/internal/tree"
 	"go.uber.org/zap"
@@ -29,6 +30,7 @@ type eventKind int
 const (
 	eventMessage eventKind = iota
 	eventDisconnect
+	EventDiskChanged
 )
 
 // event is something a connection asks Run to handle.
@@ -122,6 +124,8 @@ func (s *session) Run(ctx context.Context) error {
 				s.handleMessage(ev.client, ev.data)
 			case eventDisconnect:
 				delete(s.clients, ev.client)
+			case EventDiskChanged:
+				s.handleDiskChange()
 			}
 		}
 	}
@@ -189,6 +193,34 @@ func (s *session) handleHello(c *client, e protocol.Envelope) {
 		return
 	}
 	s.clients[c] = struct{}{}
+}
+
+func (s *session) handleDiskChange() {
+	next, _, err := project.Load(s.cfg)
+	if err != nil {
+		s.logger.Warn("rescan failed, keeping current tree", zap.Error(err))
+		return
+	}
+
+	patch := tree.Diff(s.t, next)
+	if len(patch.Added)+len(patch.Updated)+len(patch.Removed) == 0 {
+		return
+	}
+
+	if err := s.t.Apply(patch); err != nil {
+		s.logger.Error("apply disk patch", zap.Error(err))
+		return
+	}
+
+	for c := range s.clients {
+		if err := c.send("patch", patch); err != nil {
+			s.logger.Warn("send patch", zap.Error(err))
+		}
+	}
+}
+
+func (s *session) DiskChanged() {
+	s.post(event{kind: EventDiskChanged})
 }
 
 // post hands an event to run, waiting until Run takes it or has exited.

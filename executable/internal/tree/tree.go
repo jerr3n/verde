@@ -177,6 +177,27 @@ func (t *Tree) Remove(id Ref) error {
 	return nil
 }
 
+// applies a patch in protocol order: added, updated, then removed. It stops at the
+// first error, and anything before that stays applied
+func (t *Tree) Apply(p protocol.Patch) error {
+	for _, inst := range p.Added {
+		if err := t.Insert(inst); err != nil {
+			return err
+		}
+	}
+	for _, u := range p.Updated {
+		if err := t.Update(u); err != nil {
+			return err
+		}
+	}
+	for _, id := range p.Removed {
+		if err := t.Remove(id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // lists copies of every instance
 func (t *Tree) All() []protocol.Instance {
 	out := make([]protocol.Instance, 0, len(t.nodes))
@@ -191,6 +212,19 @@ func (t *Tree) All() []protocol.Instance {
 	}
 	visit(t.root)
 
+	return out
+}
+
+// appends copies of an instance and everything under it to out, parents first. The
+// top instance gets the given parent, since its real one may be in another tree
+func (t *Tree) appendSubtree(out []protocol.Instance, id, parent Ref) []protocol.Instance {
+	n := t.nodes[id]
+	inst := clone(n.inst)
+	inst.Parent = parent
+	out = append(out, inst)
+	for _, child := range n.children {
+		out = t.appendSubtree(out, child, id)
+	}
 	return out
 }
 

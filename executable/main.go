@@ -11,6 +11,7 @@ import (
 	"github.com/jerr3n/verde/executable/internal/logging"
 	"github.com/jerr3n/verde/executable/internal/project"
 	"github.com/jerr3n/verde/executable/internal/session"
+	"github.com/jerr3n/verde/executable/internal/watch"
 	"github.com/urfave/cli/v3"
 	"go.uber.org/zap"
 )
@@ -22,6 +23,11 @@ func serve(ctx context.Context, logger *zap.Logger, cfg *config.Cfg) error {
 	}
 	s := session.New(cfg, tree, mnts, logger)
 	go s.Run(ctx)
+	go func() {
+		if err := watch.Run(ctx, cfg, s.DiskChanged, logger); err != nil {
+			logger.Error("watcher stopped", zap.Error(err))
+		}
+	}()
 
 	handleWs := func(c *gin.Context) {
 		conn, err := websocket.Accept(c.Writer, c.Request, nil)

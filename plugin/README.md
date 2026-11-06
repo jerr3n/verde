@@ -37,7 +37,7 @@ To exercise the rest:
 | Module | Job |
 |---|---|
 | `init.server.luau` | Entry point. Exits during Play, then runs the main loop |
-| `Ui` | The panel: URL, connect button, status, keep-disk/keep-Studio question |
+| `Ui` | Theme-aware, scrollable panel: server address, connection status and sync review |
 | `Session` | Connection lifecycle and message handling |
 | `Connection` | The WebSocket |
 | `Sync` | Compares and applies: the core of the plugin |
@@ -49,6 +49,11 @@ To exercise the rest:
 The user presses Connect. The plugin never connects on its own, and it doesn't
 reconnect automatically, because reconnecting can overwrite Studio with what's on
 disk. It sends `hello`, gets a `snapshot`, and then both sides exchange patches.
+
+The panel remembers the server address. Press **Enter** in the address field or
+click **Connect** to connect; **Cancel** stops a pending connection. When a sync
+needs a decision, the panel shows the difference counts and explains each choice,
+including whether keeping Studio will delete files on disk.
 
 Incoming messages go into a queue, and one loop handles them every 0.1 seconds.
 Applying a change can yield, so a single loop keeps patches from interleaving.
@@ -105,11 +110,18 @@ saves with the place, so there's no property list to maintain.
 
 ```sh
 lune run test/run.luau
+lune run test/ui.luau
 ```
 
-This runs the real modules against a fake Studio (`test/fake_studio.luau`), using
-real Roblox data types and deferred events. `Ui` and `init.server.luau` aren't
-covered.
+The first suite runs the real sync modules against a fake Studio
+(`test/fake_studio.luau`), using real Roblox data types and deferred events. The UI
+suite checks address validation, keyboard connection, cancellation, status and
+choice handling, theme changes, and cleanup against real Roblox instance property
+types with fake plugin events. `init.server.luau` isn't covered.
+
+Lune doesn't render UI. In Studio, also check the panel in light and dark themes,
+resize it to a narrow, short dock, and verify that long errors wrap and the full
+sync review scrolls into view.
 
 It can't catch wrong assumptions about Studio itself. These still have to be
 checked in real Studio:

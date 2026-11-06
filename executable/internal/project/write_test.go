@@ -296,20 +296,18 @@ func TestApplyScriptWontMergeWithFolderOfTheSameName(t *testing.T) {
 		}
 	}
 
-	_, errs := Apply(f.cfg, f.tree, f.mounts, protocol.Patch{Added: []protocol.Instance{
+	f.apply(protocol.Patch{Added: []protocol.Instance{
 		script("kid", scriptRef, "Kid", "ModuleScript", "kid"),
 	}})
-	if len(errs) != 1 {
-		t.Errorf("errs = %v, want one", errs)
-	}
 
-	f.assertFile("s/Foo.luau", "script")
+	// the folder keeps its name, the script gets its own folder w/ its name inside
+	dir := "s/Foo" + tagFor(scriptRef)
 	f.assertFile("s/Foo/Bar.luau", "bar")
 	f.assertMissing("s/Foo/Kid.luau")
-	if _, ok := f.tree.Get("kid"); !ok {
-		t.Error("the instance should stay in the tree")
-	}
-	f.assertNoEcho()
+	f.assertMissing("s/Foo.luau")
+	f.assertFile(dir+"/index.luau", "script")
+	f.assertFile(dir+"/Kid.luau", "kid")
+	f.assertFile(dir+"/index.ModuleScript.inst.json", "{\n  \"id\": \""+string(scriptRef)+"\",\n  \"name\": \"Foo\"\n}\n")
 }
 
 func TestApplyRemovesToTrash(t *testing.T) {
@@ -405,42 +403,28 @@ func TestApplyRenameExistingFileWithUnsafeName(t *testing.T) {
 	f.assertMissing("s/What?.luau")
 }
 
-func TestApplyKeepsNonScriptsInTree(t *testing.T) {
+func TestApplyWritesNonScripts(t *testing.T) {
 	f := newFixture(t, nil, syncW)
 	w := f.ref("game/W")
-	anchored := map[string]protocol.Value{"Anchored": {Type: "Bool", Value: json.RawMessage("true")}}
 
 	f.apply(protocol.Patch{Added: []protocol.Instance{
-		{ID: "part", Parent: w, Name: "Lamp", Class: "Part", Props: anchored},
+		{ID: "part", Parent: w, Name: "Lamp", Class: "Part", Props: boolProp("Anchored", true)},
 		script("inner", "part", "Glow", "Script", "glow"),
 	}})
 
-	if got := f.files(); len(got) != 0 {
-		t.Errorf("files = %v, nothing here can reach disk yet", got)
-	}
-	if inst, ok := f.tree.Get("part"); !ok || inst.Props["Anchored"].Type != "Bool" {
-		t.Errorf("Part = %+v, %v", inst, ok)
-	}
-	if _, ok := f.tree.Get("inner"); !ok {
-		t.Error("the Script in the Part should stay in the tree")
-	}
+	f.assertFile("s/Lamp/index.Part.inst.json", "{\n  \"props\": {\n    \"Anchored\": {\"t\":\"Bool\",\"v\":true}\n  }\n}\n")
+	f.assertFile("s/Lamp/Glow.server.luau", "glow")
 
 	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: "inner", Props: srcProps("changed")}}})
-	if got := f.files(); len(got) != 0 {
-		t.Errorf("files = %v after an update", got)
-	}
+	f.assertFile("s/Lamp/Glow.server.luau", "changed")
 }
 
-func TestApplyPropsOnScriptsStayInTree(t *testing.T) {
+func TestApplyPropsOnScriptsGetTheirOwnFile(t *testing.T) {
 	f := newFixture(t, map[string]string{"s/Main.server.luau": "x"}, syncW)
 	id := f.ref("game/W/Main")
-	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: id, Props: map[string]protocol.Value{
-		"Disabled": {Type: "Bool", Value: json.RawMessage("true")},
-	}}}})
-	if inst, _ := f.tree.Get(id); inst.Props["Disabled"].Type != "Bool" {
-		t.Errorf("props = %+v", inst.Props)
-	}
+	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: id, Props: boolProp("Disabled", true)}}})
 	f.assertFile("s/Main.server.luau", "x")
+	f.assertFile("s/Main.Script.inst.json", "{\n  \"props\": {\n    \"Disabled\": {\"t\":\"Bool\",\"v\":true}\n  }\n}\n")
 }
 
 func TestApplyMoveIntoAndOutOfNonScript(t *testing.T) {
@@ -458,64 +442,66 @@ func TestApplyMoveIntoAndOutOfNonScript(t *testing.T) {
 		{ID: lib, Parent: "part"},
 	}})
 	f.assertMissing("s/Main.luau")
-	f.assertMissing("s/lib")
-	if got := f.trashed("s/Main.luau"); !slices.Equal(got, []string{"main"}) {
-		t.Errorf("trash = %v", got)
-	}
+	f.assertMissing("s/Lamp.Part.inst.json")
+	f.assertFile("s/Lamp/index.Part.inst.json", "{}\n")
+	f.assertFile("s/Lamp/Main.luau", "main")
+	f.assertFile("s/Lamp/lib/Sub.luau", "sub")
 
-	// Their text is still in the tree, so moving out brings back the files.
+	// moving out leaves the part as a folder, like a script that once had children
 	f.apply(protocol.Patch{Updated: []protocol.Update{
 		{ID: main, Parent: w},
 		{ID: lib, Parent: w},
 	}})
 	f.assertFile("s/Main.luau", "main")
 	f.assertFile("s/lib/Sub.luau", "sub")
+	f.assertFile("s/Lamp/index.Part.inst.json", "{}\n")
 }
 
 func TestApplySameNameSiblings(t *testing.T) {
 	f := newFixture(t, nil, syncW)
 	w := f.ref("game/W")
 
-	_, errs := Apply(f.cfg, f.tree, f.mounts, protocol.Patch{Added: []protocol.Instance{
+	f.apply(protocol.Patch{Added: []protocol.Instance{
 		script("first", w, "Dup", "ModuleScript", "first"),
 		script("second", w, "Dup", "ModuleScript", "second"),
 	}})
-	if len(errs) != 1 {
-		t.Errorf("errs = %v, want one", errs)
-	}
+	second := "s/Dup" + tagFor("second")
 	f.assertFile("s/Dup.luau", "first")
-	if !f.tree.IsFileless("second") {
-		t.Error("second should be fileless")
-	}
-	// Without the fileless mark, this would send first's text over second, or delete it.
-	f.assertNoEcho()
+	f.assertFile(second+".luau", "second")
+	f.assertFile(second+".ModuleScript.inst.json", "{\n  \"id\": \"second\",\n  \"name\": \"Dup\"\n}\n")
+	f.assertFile("s/Dup.ModuleScript.inst.json", "{\n  \"id\": \"first\"\n}\n")
 
-	// Editing the second doesn't touch the first's file.
+	// editing one doesn't touch the other's file
 	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: "second", Props: srcProps("second2")}}})
 	f.assertFile("s/Dup.luau", "first")
+	f.assertFile(second+".luau", "second2")
+	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: "first", Props: srcProps("first2")}}})
+	f.assertFile("s/Dup.luau", "first2")
+	f.assertFile(second+".luau", "second2")
 
-	// Once the name is free, the second gets it, with its latest text.
+	// deleting the first leaves the second where it is, so its file doesn't change name in
+	// git because of something that happened to another instance
 	f.apply(protocol.Patch{Removed: []protocol.Ref{"first"}})
-	f.assertFile("s/Dup.luau", "second2")
-	if f.tree.IsFileless("second") {
-		t.Error("second should have its file now")
-	}
+	f.assertMissing("s/Dup.luau")
+	f.assertMissing("s/Dup.ModuleScript.inst.json")
+	f.assertFile(second+".luau", "second2")
 }
 
 func TestApplyNamesDifferingOnlyByCase(t *testing.T) {
 	f := newFixture(t, nil, syncW)
 	w := f.ref("game/W")
 
-	_, errs := Apply(f.cfg, f.tree, f.mounts, protocol.Patch{Added: []protocol.Instance{
+	// they'd be the same file on windows and macos
+	f.apply(protocol.Patch{Added: []protocol.Instance{
 		script("a", w, "Foo", "ModuleScript", "a"),
 		script("b", w, "foo", "ModuleScript", "b"),
 	}})
-	if len(errs) != 1 {
-		t.Errorf("errs = %v, want one", errs)
-	}
 	f.assertFile("s/Foo.luau", "a")
 	f.assertMissing("s/foo.luau")
-	f.assertNoEcho()
+	f.assertFile("s/foo"+tagFor("b")+".luau", "b")
+	if got := f.restart(); got["game/W/foo"].Props["Source"].Type != "String" || got["game/W/Foo"].Props["Source"].Type != "String" {
+		t.Errorf("have %v", sortedPaths(got))
+	}
 }
 
 func TestApplyCaseOnlyRename(t *testing.T) {
@@ -753,13 +739,11 @@ func TestApplyDoesntFollowSymlinkOutOfProject(t *testing.T) {
 	}
 
 	// The scan doesn't follow it, so this can't resolve to the link either.
-	_, errs := Apply(f.cfg, f.tree, f.mounts, protocol.Patch{Added: []protocol.Instance{
+	f.apply(protocol.Patch{Added: []protocol.Instance{
 		{ID: "dir", Parent: f.ref("game/W"), Name: "Evil", Class: "Folder"},
 		script("kid", "dir", "Kid", "ModuleScript", "x"),
 	}})
-	if len(errs) != 1 {
-		t.Errorf("errs = %v, want one", errs)
-	}
+	f.assertFile("s/Evil"+tagFor("dir")+"/Kid.luau", "x")
 	entries, err := os.ReadDir(outside)
 	if err != nil {
 		t.Fatal(err)

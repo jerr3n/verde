@@ -68,6 +68,9 @@ func Apply(cfg *config.Cfg, t *tree.Tree, mounts []protocol.Mount, p protocol.Pa
 	}
 	w.remove(p.Removed)
 	w.retryFileless()
+	if len(p.Updated)+len(p.Removed) > 0 {
+		w.dropUnneededTags()
+	}
 
 	// Reported only now, because a later change in the patch can clear the way. Swapping
 	// two names, or deleting a script and adding its replacement, isn't a problem.
@@ -89,6 +92,7 @@ type writer struct {
 	applied       protocol.Patch
 	errs          []error
 	newlyFileless []filelessReason
+	tagged        []protocol.Ref // given a tag by this patch, since their name was taken
 }
 
 type filelessReason struct {
@@ -96,11 +100,12 @@ type filelessReason struct {
 	err error
 }
 
-// location is where an instance is on disk, as a /-separated path from the project root.
+// where an instance is on disk, as /-separated paths from the project root
 type location struct {
-	path string // its file, or its folder if isDir
-	file string // the file holding Source, or "" for a Folder
-	dir  bool   // path is a folder its children go in
+	path  string // its file, or its folder if dir
+	file  string // file holding Source, "" if it isn't a script
+	props string // its .inst.json, which a script or folder may not have
+	dir   bool   // path is a folder its children go in
 }
 
 func (w *writer) report(id protocol.Ref, err error) {
@@ -145,25 +150,6 @@ func (w *writer) insideSync(id protocol.Ref) bool {
 			return false
 		}
 		id = inst.Parent
-	}
-	return false
-}
-
-// reachesDisk reports whether an instance's class and all its ancestors can be files.
-// A script inside a Part can't yet, since there's nowhere to put the Part.
-func (w *writer) reachesDisk(inst protocol.Instance) bool {
-	if !tree.OnDisk(inst.Class) {
-		return false
-	}
-	for id := inst.Parent; id != ""; {
-		if _, ok := w.syncDirs[id]; ok {
-			return true
-		}
-		parent, ok := w.tree.Get(id)
-		if !ok || !tree.OnDisk(parent.Class) {
-			return false
-		}
-		id = parent.Parent
 	}
 	return false
 }
@@ -244,10 +230,24 @@ func (w *writer) update(u protocol.Update) {
 	if _, changed := u.Props["Source"]; changed && scriptSuffix(before.Class) != "" {
 		w.writeSource(u.ID)
 	}
+	// a move can land on a .inst.json left behind by a deleted script
+	if renamed || moved || changesSavedProps(before.Class, u.Props) {
+		w.saveProps(u.ID)
+	}
 
 	if u.Name != "" || u.Parent != "" || len(u.Props) > 0 {
 		w.applied.Updated = append(w.applied.Updated, u)
 	}
+}
+
+// reports whether an update touches anything but a script's source
+func changesSavedProps(class string, props map[string]protocol.Value) bool {
+	for name := range props {
+		if name != "Source" || scriptSuffix(class) == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // relocate puts an instance's file or folder where the tree now says it belongs. A
@@ -255,14 +255,11 @@ func (w *writer) update(u protocol.Update) {
 // An error means nothing moved.
 func (w *writer) relocate(id protocol.Ref, old location) error {
 	inst, _ := w.tree.Get(id)
-	if !w.reachesDisk(inst) {
-		return w.trash(old.path)
-	}
 
 	target, err := w.relocateTarget(inst, old)
 	var why blocked
 	if errors.As(err, &why) {
-		if err := w.trash(old.path); err != nil {
+		if err := w.trashLocation(old); err != nil {
 			return err
 		}
 		w.markFileless(id, why)
@@ -274,7 +271,38 @@ func (w *writer) relocate(id protocol.Ref, old location) error {
 	if target == old.path {
 		return nil
 	}
-	return w.root.Rename(old.path, target)
+	if err := w.root.Rename(old.path, target); err != nil {
+		return err
+	}
+	if w.hasSeparateProps(old) {
+		if err := w.root.Rename(old.props, scriptProps(target, inst.Class)); err != nil {
+			w.root.Rename(target, old.path)
+			return err
+		}
+	}
+	return nil
+}
+
+// reports whether a script stored as one file has a .inst.json next to it, which has to move
+// with it. in a folder, it moves w/ the folder
+func (w *writer) hasSeparateProps(loc location) bool {
+	if loc.dir || loc.file == "" {
+		return false
+	}
+	_, err := w.root.Lstat(loc.props)
+	return err == nil
+}
+
+// moves an instance's file or folder to the trash
+func (w *writer) trashLocation(loc location) error {
+	separate := w.hasSeparateProps(loc)
+	if err := w.trash(loc.path); err != nil {
+		return err
+	}
+	if separate {
+		return w.trash(loc.props)
+	}
+	return nil
 }
 
 func (w *writer) relocateTarget(inst protocol.Instance, old location) (string, error) {
@@ -285,25 +313,111 @@ func (w *writer) relocateTarget(inst protocol.Instance, old location) (string, e
 	if err != nil {
 		return "", err
 	}
+	return w.chooseTarget(dir, inst, old.dir, old.path)
+}
 
+// picks the path for an instance's file, or folder if asDir. plain name if it's free, name
+// plus tag if not, and then the file holds the real name and id. current doesn't count as
+// taken
+func (w *writer) chooseTarget(dir string, inst protocol.Instance, asDir bool, current string) (string, error) {
+	suffix := ""
+	if !asDir {
+		suffix = leafSuffix(inst.Class)
+	}
 	name := encodeName(inst.Name)
-	if !old.dir {
-		name += scriptSuffix(inst.Class)
+
+	plain := path.Join(dir, name+suffix)
+	if plain == current {
+		return plain, nil
 	}
-	target := path.Join(dir, name)
-	if target == old.path {
-		return target, nil
-	}
-	if err := w.checkPath(target); err != nil {
+	if err := w.checkPath(plain); err != nil {
 		return "", err
 	}
 	// A case-only rename finds itself on a case-insensitive filesystem.
-	if !strings.EqualFold(target, old.path) {
-		if err := w.checkFree(target); err != nil {
+	taken := false
+	if !strings.EqualFold(plain, current) {
+		if _, err := w.root.Lstat(plain); err == nil {
+			taken = true
+		} else if !errors.Is(err, fs.ErrNotExist) {
 			return "", err
 		}
 	}
-	return target, nil
+	if !taken && !w.takenInOtherCase(dir, name, inst.Class, current) {
+		return plain, nil
+	}
+
+	tagged := path.Join(dir, name+tagFor(inst.ID)+suffix)
+	if tagged == current {
+		return tagged, nil
+	}
+	if err := w.checkPath(tagged); err != nil {
+		return "", err
+	}
+	// its real name goes there, so scans have to be able to read it
+	if err := w.checkPath(propsFileFor(tagged, inst.Class, asDir)); err != nil {
+		return "", err
+	}
+	if err := w.checkFree(tagged); err != nil {
+		return "", err
+	}
+	w.tagged = append(w.tagged, inst.ID)
+	return tagged, nil
+}
+
+// .inst.json file of an instance stored at target
+func propsFileFor(target, class string, asDir bool) string {
+	switch {
+	case asDir:
+		return indexProps(target, class)
+	case scriptSuffix(class) != "":
+		return scriptProps(target, class)
+	}
+	return target
+}
+
+// reports whether a sibling of the same class has this name, ignoring case or as a folder,
+// which lstat can't see. Foo and foo are the same file on windows and macos
+func (w *writer) takenInOtherCase(dir, name, class, current string) bool {
+	entries, err := fs.ReadDir(w.scan.files, dir)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		stem, ok := entryStem(entry, class)
+		if !ok || !strings.EqualFold(stem, name) {
+			continue
+		}
+		full := path.Join(dir, entry.Name())
+		if full == current {
+			continue
+		}
+		if !entry.IsDir() {
+			return true
+		}
+		if index, err := w.scan.findIndex(full); err == nil && indexClass(index) == class {
+			return true
+		}
+	}
+	return false
+}
+
+// moves instances tagged by this patch to their plain names, if those are free by now.
+// swapping two names, or replacing a script, only needs a tag halfway through
+func (w *writer) dropUnneededTags() {
+	for _, id := range w.tagged {
+		if _, ok := w.tree.Get(id); !ok {
+			continue
+		}
+		loc, onDisk := w.locate(id)
+		if !onDisk {
+			continue
+		}
+		if err := w.relocate(id, loc); err != nil {
+			w.report(id, err)
+			continue
+		}
+		w.saveProps(id)
+	}
 }
 
 // remove handles a patch's removals. The plugin lists descendants too, in no particular
@@ -314,7 +428,7 @@ func (w *writer) remove(ids []protocol.Ref) {
 		removing[id] = true
 	}
 
-	var files []string
+	var locations []location
 	for _, id := range ids {
 		if w.mounts[id] {
 			w.report(id, errors.New("a mount can't be removed"))
@@ -336,7 +450,7 @@ func (w *writer) remove(ids []protocol.Ref) {
 		}
 		if top {
 			if loc, onDisk := w.locate(id); onDisk {
-				files = append(files, loc.path)
+				locations = append(locations, loc)
 			}
 		}
 	}
@@ -352,11 +466,11 @@ func (w *writer) remove(ids []protocol.Ref) {
 		w.applied.Removed = append(w.applied.Removed, id)
 	}
 
-	for _, file := range files {
+	for _, loc := range locations {
 		// The file stays, so the next scan brings the instance back. That undoes the
 		// user's delete, but it loses nothing, and they get this error to explain it.
-		if err := w.trash(file); err != nil {
-			w.errs = append(w.errs, fmt.Errorf("remove %s: %w", file, err))
+		if err := w.trashLocation(loc); err != nil {
+			w.errs = append(w.errs, fmt.Errorf("remove %s: %w", loc.path, err))
 		}
 	}
 }
@@ -375,10 +489,6 @@ func (w *writer) retryFileless() {
 func (w *writer) place(id protocol.Ref) {
 	inst, ok := w.tree.Get(id)
 	if !ok {
-		return
-	}
-	if !w.reachesDisk(inst) {
-		w.tree.SetFileless(id, false) // the scan doesn't look here, so there's no need
 		return
 	}
 	if err := w.createOnDisk(inst); err != nil {
@@ -411,36 +521,176 @@ func (w *writer) createOnDisk(inst protocol.Instance) error {
 	// A file can already be here if an earlier write failed, or if it was just created
 	// and hasn't been scanned yet. The tree wins, but the file's text goes to the trash.
 	if loc, found := w.find(dir, inst); found {
-		if loc.file == "" {
-			return nil
+		taken, err := w.claimedBySibling(dir, inst, loc)
+		if err != nil {
+			return err
 		}
+		if !taken {
+			if loc.file != "" {
+				text, err := sourceText(inst)
+				if err != nil {
+					return err
+				}
+				if err := w.replaceFile(loc.file, text); err != nil {
+					return err
+				}
+			}
+			return w.writeProps(inst, loc, w.replaceFile)
+		}
+	}
+
+	target, err := w.chooseTarget(dir, inst, inst.Class == "Folder", "")
+	if err != nil {
+		return err
+	}
+
+	var loc location
+	switch {
+	case inst.Class == "Folder":
+		if err := w.root.Mkdir(target, 0o755); err != nil {
+			return err
+		}
+		loc = location{path: target, props: indexProps(target, inst.Class), dir: true}
+	case scriptSuffix(inst.Class) != "":
 		text, err := sourceText(inst)
 		if err != nil {
 			return err
 		}
-		if current, err := w.root.ReadFile(loc.file); err == nil && string(current) != text {
-			if err := w.trash(loc.file); err != nil {
-				return err
-			}
+		if err := w.writeFile(target, text); err != nil {
+			return err
 		}
-		return w.writeFile(loc.file, text)
+		loc = location{path: target, file: target, props: scriptProps(target, inst.Class)}
+	default:
+		loc = location{path: target, props: target}
+	}
+	return w.writeProps(inst, loc, w.replaceFile)
+}
+
+// reports whether a file w/ no id, found for a new instance, is really a same-named
+// sibling's. if so, it gets that sibling's id, so a later scan can tell them apart. a file
+// w/ no id always belongs to the only instance with its name and class
+func (w *writer) claimedBySibling(dir string, inst protocol.Instance, loc location) (bool, error) {
+	if w.readFileMeta(loc, inst.Class).ID != "" {
+		return false, nil
+	}
+	for _, id := range w.tree.Children(inst.Parent) {
+		other, _ := w.tree.Get(id)
+		if id == inst.ID || other.Class != inst.Class || other.Name != inst.Name || w.tree.IsFileless(id) {
+			continue
+		}
+		// it has its own tagged file, so this one isn't its
+		if tagged := path.Join(dir, encodeName(other.Name)+tagFor(id)); w.exists(tagged) || w.exists(tagged+leafSuffix(other.Class)) {
+			continue
+		}
+		if err := w.checkPath(loc.props); err != nil {
+			return false, err
+		}
+		file := instFile{ID: id, Props: savedProps(other)}
+		text, err := encodeInst(file)
+		if err != nil {
+			return false, err
+		}
+		return true, w.writeFile(loc.props, text)
+	}
+	return false, nil
+}
+
+func (w *writer) exists(name string) bool {
+	_, err := w.root.Lstat(name)
+	return err == nil
+}
+
+// what a location's .inst.json says, if it has one that can be read
+func (w *writer) readFileMeta(loc location, class string) instFile {
+	file, err := w.scan.readOptionalInst(loc.props, class)
+	if err != nil {
+		return instFile{}
+	}
+	return file
+}
+
+// writes a file, trashing different text that's already there
+func (w *writer) replaceFile(name, text string) error {
+	if current, err := w.root.ReadFile(name); err == nil && string(current) != text {
+		if err := w.trash(name); err != nil {
+			return err
+		}
+	}
+	return w.writeFile(name, text)
+}
+
+// writes an instance's props to its .inst.json. marks it fileless on failure, or the next
+// scan would send the old values back over the change. skips mounts, service props aren't
+// synced
+func (w *writer) saveProps(id protocol.Ref) {
+	if w.mounts[id] || w.tree.IsFileless(id) {
+		return
+	}
+	loc, onDisk := w.locate(id)
+	if !onDisk {
+		w.place(id) // its file is gone, so this makes a new one
+		return
+	}
+	inst, _ := w.tree.Get(id)
+	if err := w.writeProps(inst, loc, w.writeFile); err != nil {
+		w.markFileless(id, err)
+	}
+}
+
+// writes the .inst.json at loc. a script or folder only has one if there's something to
+// store, and goes without if ignore.paths matches, since its other file says it exists.
+// anything else has nowhere else to exist
+func (w *writer) writeProps(inst protocol.Instance, loc location, write func(name, text string) error) error {
+	stem := path.Base(loc.path)
+	if !loc.dir {
+		stem = strings.TrimSuffix(stem, leafSuffix(inst.Class))
 	}
 
-	target := path.Join(dir, encodeName(inst.Name)+scriptSuffix(inst.Class))
-	if err := w.checkPath(target); err != nil {
-		return err
+	file := instFile{Props: savedProps(inst)}
+	if decodeName(stem) != inst.Name {
+		file.Name = inst.Name
 	}
-	if err := w.checkFree(target); err != nil {
-		return err
+	switch {
+	case strings.HasSuffix(stem, tagFor(inst.ID)):
+		file.ID = inst.ID
+	case w.readFileMeta(loc, inst.Class).ID != "" && w.hasTwin(inst):
+		file.ID = inst.ID // first of its name, siblings still need telling apart
 	}
-	if inst.Class == "Folder" {
-		return w.root.Mkdir(target, 0o755)
+
+	optional := loc.file != "" || (loc.dir && inst.Class == "Folder")
+	if optional && file.ID == "" && file.Name == "" {
+		ignored, err := w.scan.pathIgnored(loc.props)
+		if err != nil {
+			return err
+		}
+		if ignored {
+			return nil
+		}
+		if len(file.Props) == 0 {
+			if _, err := w.root.Lstat(loc.props); errors.Is(err, fs.ErrNotExist) {
+				return nil
+			} else if err != nil {
+				return err
+			}
+			return w.trash(loc.props) // the next scan would send its values to studio
+		}
 	}
-	text, err := sourceText(inst)
+	text, err := encodeInst(file)
 	if err != nil {
 		return err
 	}
-	return w.writeFile(target, text)
+	return write(loc.props, text)
+}
+
+// reports whether a sibling has the same name and class
+func (w *writer) hasTwin(inst protocol.Instance) bool {
+	for _, id := range w.tree.Children(inst.Parent) {
+		other, _ := w.tree.Get(id)
+		if id != inst.ID && other.Class == inst.Class && other.Name == inst.Name {
+			return true
+		}
+	}
+	return false
 }
 
 // writeSource writes an instance's Source to its file. If that fails, the instance is
@@ -469,17 +719,11 @@ func (w *writer) checkAllowed(inst protocol.Instance) error {
 	if inst.Name == "" {
 		return blocked("it has no name")
 	}
+	if !validClass(inst.Class) {
+		return blocked(fmt.Sprintf("its class %q can't be part of a file name", inst.Class))
+	}
 	if w.scan.instanceIgnored(w.instancePath(inst.ID), inst.Class) {
 		return blocked("it matches ignore.instances or ignore.classes")
-	}
-	// Files can't share a name. This ignores case, because on Windows and macOS Foo and
-	// foo are the same file, and one would overwrite the other.
-	for _, id := range w.tree.Children(inst.Parent) {
-		other, _ := w.tree.Get(id)
-		if id != inst.ID && other.Class == inst.Class && strings.EqualFold(other.Name, inst.Name) &&
-			!w.tree.IsFileless(id) {
-			return blocked(fmt.Sprintf("another %s next to it is called %s, and they can't share a file", other.Class, other.Name))
-		}
 	}
 	return nil
 }
@@ -511,52 +755,135 @@ func (w *writer) locate(id protocol.Ref) (location, bool) {
 		return location{path: dir, dir: true}, true
 	}
 	inst, ok := w.tree.Get(id)
-	if !ok || w.tree.IsFileless(id) || !tree.OnDisk(inst.Class) {
+	if !ok || w.tree.IsFileless(id) {
 		return location{}, false
 	}
 	parent, ok := w.locate(inst.Parent)
 	if !ok || !parent.dir {
 		return location{}, false
 	}
-	return w.find(parent.path, inst)
+	if loc, found := w.find(parent.path, inst); found {
+		return loc, true
+	}
+	return w.search(parent.path, inst)
 }
 
-// find looks through a folder for an instance. It decodes each entry, rather than
-// encoding the name and checking one path, because a file from outside Verde may hold a
-// character that encodeName would have escaped, like What?.luau.
+// looks through a folder for an instance by its tag or name. decodes each entry instead of
+// checking one encoded path, since a file from outside verde may hold a character
+// encodeName would've escaped, like What?.luau
 func (w *writer) find(dir string, inst protocol.Instance) (location, bool) {
 	entries, err := fs.ReadDir(w.scan.files, dir)
 	if err != nil {
 		return location{}, false
 	}
-
-	suffix := scriptSuffix(inst.Class)
+	tag := tagFor(inst.ID)
+	var named location
+	foundNamed := false
 	for _, entry := range entries {
-		full := path.Join(dir, entry.Name())
-		switch {
-		case entry.IsDir() && decodeName(entry.Name()) == inst.Name:
-			index, err := w.scan.findIndex(full)
-			if err != nil {
-				continue
-			}
-			if index == "" && inst.Class == "Folder" {
-				return location{path: full, dir: true}, true
-			}
-			if suffix != "" && index == "index"+suffix {
-				return location{path: full, file: path.Join(full, index), dir: true}, true
-			}
-		case entry.Type().IsRegular() && suffix != "":
-			name, class, ok := classify(entry.Name())
-			if ok && !isIndex(entry.Name()) && class == inst.Class && decodeName(name) == inst.Name {
-				return location{path: full, file: full}, true
-			}
+		stem, ok := entryStem(entry, inst.Class)
+		if !ok {
+			continue
+		}
+		tagged := strings.HasSuffix(stem, tag)
+		if !tagged && (foundNamed || decodeName(stem) != inst.Name) {
+			continue
+		}
+		loc, ok := w.entryLocation(dir, entry, inst.Class)
+		if !ok || !w.holds(loc, stem, inst) {
+			continue
+		}
+		// its own tag beats a file w/ its name, which may be a sibling's
+		if tagged {
+			return loc, true
+		}
+		named, foundNamed = loc, true
+	}
+	return named, foundNamed
+}
+
+// find for a file whose name says nothing about what's in it, because someone renamed it.
+// opens every file of the class, so it's only for when find came up empty and the instance
+// should have a file
+func (w *writer) search(dir string, inst protocol.Instance) (location, bool) {
+	entries, err := fs.ReadDir(w.scan.files, dir)
+	if err != nil {
+		return location{}, false
+	}
+	for _, entry := range entries {
+		stem, ok := entryStem(entry, inst.Class)
+		if !ok {
+			continue
+		}
+		if loc, ok := w.entryLocation(dir, entry, inst.Class); ok && w.holds(loc, stem, inst) {
+			return loc, true
 		}
 	}
 	return location{}, false
 }
 
-// childDir returns the folder an instance's children go in, creating it if needed. A
-// script stored as Foo.luau becomes Foo/index.luau the first time it needs one.
+// an entry's name without its suffix, if it could hold an instance of class. a folder
+// could, depending on its index
+func entryStem(entry fs.DirEntry, class string) (string, bool) {
+	switch {
+	case entry.IsDir():
+		return entry.Name(), true
+	case !entry.Type().IsRegular():
+		return "", false
+	case scriptSuffix(class) != "":
+		name, found, ok := classify(entry.Name())
+		return name, ok && found == class && !isIndex(entry.Name())
+	}
+	name, found, ok := classifyInst(entry.Name())
+	return name, ok && found == class && name != "index"
+}
+
+// where an instance of class is, given the entry holding it
+func (w *writer) entryLocation(dir string, entry fs.DirEntry, class string) (location, bool) {
+	full := path.Join(dir, entry.Name())
+	isScript := scriptSuffix(class) != ""
+	if entry.IsDir() {
+		index, err := w.scan.findIndex(full)
+		if err != nil || indexClass(index) != class {
+			return location{}, false
+		}
+		loc := location{path: full, props: indexProps(full, class), dir: true}
+		if isScript {
+			loc.file = path.Join(full, index)
+		}
+		return loc, true
+	}
+	if isScript {
+		return location{path: full, file: full, props: scriptProps(full, class)}, true
+	}
+	return location{path: full, props: full}, true
+}
+
+// reports whether the file at loc is this instance's. there's no stored mapping, so this
+// goes by its id, or its name if it has none. an id that's not in the tree means someone
+// edited the file, so the name decides
+func (w *writer) holds(loc location, stem string, inst protocol.Instance) bool {
+	file := w.readFileMeta(loc, inst.Class)
+	if file.ID == inst.ID {
+		return true
+	}
+	if file.ID != "" {
+		if _, inTree := w.tree.Get(file.ID); inTree {
+			return false
+		}
+	}
+	// its own tag, on a file that's been renamed but has no .inst.json yet
+	if strings.HasSuffix(stem, tagFor(inst.ID)) {
+		return true
+	}
+	name := file.Name
+	if name == "" {
+		name = decodeName(stem)
+	}
+	return name == inst.Name
+}
+
+// returns the folder an instance's children go in, creating it if needed. Foo.luau becomes
+// Foo/index.luau the first time, and Lamp.Part.inst.json becomes Lamp/index.Part.inst.json
 func (w *writer) childDir(id protocol.Ref) (string, error) {
 	if dir, ok := w.syncDirs[id]; ok {
 		return dir, w.root.MkdirAll(dir, 0o755)
@@ -570,8 +897,13 @@ func (w *writer) childDir(id protocol.Ref) (string, error) {
 	}
 
 	inst, _ := w.tree.Get(id)
-	suffix := scriptSuffix(inst.Class)
+	suffix := leafSuffix(inst.Class)
 	dir := strings.TrimSuffix(loc.path, suffix)
+	// Foo/ may belong to a Folder or another script called Foo. merging them would change
+	// what the scan reads, so this one gets its own folder
+	if tag := tagFor(id); w.exists(dir) && !strings.HasSuffix(dir, tag) {
+		dir += tag
+	}
 	index := path.Join(dir, "index"+suffix)
 	if err := w.checkPath(dir); err != nil {
 		return "", err
@@ -579,17 +911,36 @@ func (w *writer) childDir(id protocol.Ref) (string, error) {
 	if err := w.checkPath(index); err != nil {
 		return "", err
 	}
-	// Foo/ may belong to a Folder or another script called Foo. Merging them would
-	// change what the scan reads.
+	if err := w.checkPath(indexProps(dir, inst.Class)); err != nil {
+		return "", err
+	}
 	if err := w.checkFree(dir); err != nil {
 		return "", err
 	}
 	if err := w.root.Mkdir(dir, 0o755); err != nil {
 		return "", err
 	}
+	separate := w.hasSeparateProps(loc)
 	if err := w.root.Rename(loc.path, index); err != nil {
 		w.root.Remove(dir)
 		return "", err
+	}
+	if separate {
+		if err := w.root.Rename(loc.props, indexProps(dir, inst.Class)); err != nil {
+			w.root.Rename(index, loc.path)
+			w.root.Remove(dir)
+			return "", err
+		}
+	}
+	moved := location{path: dir, props: indexProps(dir, inst.Class), dir: true}
+	if loc.file != "" {
+		moved.file = index
+	}
+	// a tag means the name doesn't match anymore, so the file has to say what it is
+	if strings.HasSuffix(dir, tagFor(id)) {
+		if err := w.writeProps(inst, moved, w.writeFile); err != nil {
+			return "", err
+		}
 	}
 	return dir, nil
 }

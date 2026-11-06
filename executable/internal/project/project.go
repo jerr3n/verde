@@ -7,6 +7,11 @@
 //	Util.luau                ModuleScript
 //	lib/                     Folder
 //	Shop/index.server.luau   Shop, as a Script whose children are the rest of Shop/
+//	Lamp.Part.inst.json      Lamp, as a Part with the properties in the file
+//	Car/index.Model.inst.json  Car, as a Model whose children are the rest of Car/
+//	Main.Script.inst.json    Main.server.luau's properties other than Source
+//	lib/index.Folder.inst.json  lib's properties, if it has any
+//	Part~3f9a1c2e7b04.Part.inst.json  a second Part called Part, with its name inside
 //
 // Other files are skipped. Names that aren't safe as file names are percent-encoded
 // (see encodeName). Load reads this mapping from disk, and Apply writes it.
@@ -56,6 +61,7 @@ func Load(cfg *config.Cfg) (*tree.Tree, []protocol.Mount, error) {
 		mounts: []protocol.Mount{{ID: game, Path: []string{}, Sync: false}},
 		refs:   map[string]protocol.Ref{"": game},
 		seen:   map[sibling]string{},
+		ids:    map[protocol.Ref]string{},
 	}
 
 	for _, entry := range cfg.Sync {
@@ -121,7 +127,8 @@ type loader struct {
 	tree   *tree.Tree
 	mounts []protocol.Mount
 	refs   map[string]protocol.Ref // mount path -> Ref, with "" as the DataModel
-	seen   map[sibling]string      // instances added so far -> the file each came from
+	seen   map[sibling]string      // instances so far w/ no id -> file each came from
+	ids    map[protocol.Ref]string // ids from .inst.json files -> file each came from
 }
 
 // addMount adds a sync target from the config, such as
@@ -236,18 +243,28 @@ func (l *loader) loadChildren(dir, instancePath string, parent protocol.Ref) err
 	return nil
 }
 
-// loadDir turns a folder into an instance, then loads what's inside it. With an
-// index file, the folder becomes that script. Otherwise, it's a Folder.
+// turns a folder into an instance, then loads what's inside. its index file decides what it
+// becomes, otherwise it's a Folder
 func (l *loader) loadDir(full, name, instancePath string, parent protocol.Ref) error {
 	index, err := l.findIndex(full)
 	if err != nil {
 		return err
 	}
+	class := indexClass(index)
 
-	class, source := "Folder", ""
-	if index != "" {
-		_, class, _ = classify(index)
+	var source string
+	var file instFile
+	if isIndex(index) {
 		source = path.Join(full, index)
+		file, err = l.readOptionalInst(indexProps(full, class), class)
+	} else if index != "" {
+		file, err = l.readInst(path.Join(full, index), class)
+	}
+	if err != nil {
+		return err
+	}
+	if file.Name != "" {
+		name = file.Name
 	}
 
 	// Skipping an ignored folder also skips everything inside it.
@@ -256,41 +273,78 @@ func (l *loader) loadDir(full, name, instancePath string, parent protocol.Ref) e
 		return nil
 	}
 
-	ref, err := l.insert(parent, name, class, source)
+	ref, err := l.insert(parent, name, class, full, source, file)
 	if err != nil {
 		return err
 	}
 	return l.loadChildren(full, childPath, ref)
 }
 
-// loadFile turns a script file into an instance. Other files are skipped, and so are
-// index files, because loadDir has already used them.
+// turns a script or .inst.json file into an instance. skips index files, loadDir used those.
+// a script's .inst.json is read w/ its script, so a leftover one can't bring it back
 func (l *loader) loadFile(full, filename, instancePath string, parent protocol.Ref) error {
+	if name, class, ok := classifyInst(filename); ok {
+		if name == "index" || scriptSuffix(class) != "" {
+			return nil
+		}
+		file, err := l.readInst(full, class)
+		if err != nil {
+			return err
+		}
+		name = decodeName(name)
+		if file.Name != "" {
+			name = file.Name
+		}
+		if l.instanceIgnored(instancePath+"/"+name, class) {
+			return nil
+		}
+		_, err = l.insert(parent, name, class, full, "", file)
+		return err
+	}
+
 	name, class, ok := classify(filename)
 	if !ok || isIndex(filename) {
 		return nil
 	}
+	file, err := l.readOptionalInst(scriptProps(full, class), class)
+	if err != nil {
+		return err
+	}
 	name = decodeName(name)
+	if file.Name != "" {
+		name = file.Name
+	}
 	if l.instanceIgnored(instancePath+"/"+name, class) {
 		return nil
 	}
-	_, err := l.insert(parent, name, class, full)
+	_, err = l.insert(parent, name, class, full, full, file)
 	return err
 }
 
-// insert adds an instance to the tree and returns its Ref. If source is set, that
-// file's text becomes the instance's Source.
-func (l *loader) insert(parent protocol.Ref, name, class, source string) (protocol.Ref, error) {
-	inst := protocol.Instance{ID: newRef(), Parent: parent, Name: name, Class: class}
-
-	if source != "" {
-		// Foo.luau and Foo/index.luau would both be a ModuleScript called Foo.
+// adds an instance to the tree and returns its ref. origin is the file or folder it came
+// from. if source is set, that file's text becomes Source
+func (l *loader) insert(parent protocol.Ref, name, class, origin, source string, file instFile) (protocol.Ref, error) {
+	id := file.ID
+	if id != "" {
+		// copying a file copies its id, and they can't be the same instance
+		if other, exists := l.ids[id]; exists {
+			return "", fmt.Errorf("%s and %s have the same id. Remove the id from the copy, and give it another name", other, origin)
+		}
+		l.ids[id] = origin
+	} else {
+		// Foo.luau and Foo/index.luau would both be a ModuleScript called Foo. nothing tells
+		// them apart, so verde wouldn't know which one a change from studio was for
 		key := sibling{parent, name, class}
 		if other, exists := l.seen[key]; exists {
-			return "", fmt.Errorf("%s and %s are both a %s called %s", other, source, class, name)
+			return "", fmt.Errorf("%s and %s are both a %s called %s", other, origin, class, name)
 		}
-		l.seen[key] = source
+		l.seen[key] = origin
+		id = newRef()
+	}
 
+	inst := protocol.Instance{ID: id, Parent: parent, Name: name, Class: class, Props: file.Props}
+
+	if source != "" {
 		text, err := fs.ReadFile(l.files, source)
 		if err != nil {
 			return "", err
@@ -305,7 +359,10 @@ func (l *loader) insert(parent protocol.Ref, name, class, source string) (protoc
 		if err != nil {
 			return "", err
 		}
-		inst.Props = map[string]protocol.Value{"Source": {Type: "String", Value: encoded}}
+		if inst.Props == nil {
+			inst.Props = map[string]protocol.Value{}
+		}
+		inst.Props["Source"] = protocol.Value{Type: "String", Value: encoded}
 	}
 
 	if err := l.tree.Insert(inst); err != nil {
@@ -314,8 +371,8 @@ func (l *loader) insert(parent protocol.Ref, name, class, source string) (protoc
 	return inst.ID, nil
 }
 
-// findIndex returns the name of a folder's index file, or "" if it doesn't have one.
-// More than one is an error, because a folder can only become one script.
+// returns a folder's index file, or "" if it doesn't have one. more than one is an error,
+// since a folder can only become one instance
 func (l *loader) findIndex(dir string) (string, error) {
 	entries, err := fs.ReadDir(l.files, dir)
 	if err != nil {
@@ -324,7 +381,7 @@ func (l *loader) findIndex(dir string) (string, error) {
 
 	found := ""
 	for _, entry := range entries {
-		if !entry.Type().IsRegular() || !isIndex(entry.Name()) {
+		if !entry.Type().IsRegular() || !(isIndex(entry.Name()) || isInstIndex(entry.Name())) {
 			continue
 		}
 		ignored, err := l.pathIgnored(path.Join(dir, entry.Name()))

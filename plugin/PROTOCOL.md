@@ -131,7 +131,9 @@ Studio and gives it a new Ref. That's fine at first. Detecting real renames can 
 
 ### 10. Finish
 
-- [ ] Write non-script instances and properties to disk (see below).
+- [x] Write non-script instances and properties to disk (see below).
+- [x] Give siblings with the same name their own files.
+- [ ] Store `Ref` properties in files.
 - [x] Add a `verde init` command that generates `project.yml`.
 - [ ] Add end-to-end Go tests that connect as a plugin and check the messages and files.
 - [ ] Run the manual Studio checks in `README.md`.
@@ -144,13 +146,15 @@ Studio and gives it a new Ref. That's fine at first. Detecting real renames can 
 |---|---|
 | How classes map to files | Use `.server.luau` for `Script`, `.client.luau` for `LocalScript`, `.luau` for `ModuleScript`, and directories for `Folder` |
 | A script with children | Use a directory containing `index.server.luau`, `index.client.luau` or `index.luau` |
-| Non-script instances | Kept in memory for now, along with any scripts inside them. Later, store them as JSON files. Until then, they stop syncing after a server restart |
-| Siblings with the same name | The first gets the file, and the others stay in memory with a warning until the name is free. Later, add a stable suffix to the file name and store the real name inside. Studio allows many children named `Part`, but they can't share a path |
+| Non-script instances | Stored as `.inst.json` files (see "Instances on disk") |
+| `Ref` properties | Kept in memory for now, because a `Ref` changes on every load and a saved one wouldn't point at anything. They're lost on a server restart. Later, store a permanent id in the target's file |
+| Siblings with the same name | The first gets the plain file name, and the others add a tag made from their Ref, with their real name and an id inside (see "Instances on disk"). Studio allows many children named `Part`, but they can't share a path |
 | Empty `placeIds` | Allow any place |
 | `placeId` 0 (unpublished place) | Allow it only when `placeIds` is empty |
 
-The plugin matches same-named siblings by name and class, in the order they're listed.
-Keep that order stable between connects, or their properties can get swapped.
+The plugin pairs same-named siblings by what they hold, including everything under them, because
+files come back in an order Studio knows nothing about. Any left over, because they changed
+while disconnected, pair by position.
 
 ## Names on disk
 
@@ -169,9 +173,82 @@ file name and scans decode it. These all come back as the same name:
 An instance that should have a file but can't is marked *fileless*: it stays in the tree
 and the snapshot, and scans leave it alone. Otherwise, a scan would take the missing file
 as a deletion and remove it from Studio, or send an older file's text over an edit. This
-covers siblings whose names match (ignoring case, for Windows and macOS), matches for
-`ignore`, a script whose folder name is taken, and failed writes. Each patch and each scan
-that changes something tries again. The user gets one `error` per instance.
+covers matches for `ignore`, names and classes that can't be written, and failed writes. Each
+patch and each scan that changes something tries again. The user gets one `error` per
+instance.
+
+## Instances on disk
+
+Anything that isn't a script or a plain `Folder` is stored in a `.inst.json` file, with its
+name and class in the file name. An instance with children is a folder with an index file,
+the same way `Shop/index.luau` works:
+
+```
+src/workspace/
+  Lamp.Part.inst.json         a Part with no children
+  Car/
+    index.Model.inst.json     makes Car a Model
+    Wheel.Part.inst.json
+    Drive.server.luau
+    Drive.Script.inst.json    Drive's properties other than Source
+  lib/
+    index.Folder.inst.json    lib's tags, attributes and other properties
+    Util.luau
+    Util.ModuleScript.inst.json
+```
+
+The file holds the wire values from [Values](#values), one to a line and sorted by name, so
+that a change is a one-line diff:
+
+```json
+{
+  "props": {
+    "Anchored": {"t":"Bool","v":true},
+    "Size": {"t":"Vector3","v":[4,1,2]}
+  }
+}
+```
+
+- Only properties that differ from a new instance are stored, so `{}` is a valid file.
+- A script or `Folder` only has a `.inst.json` file if it has properties to store. A script's
+  `Source` is always in its `.luau` file.
+- The class is in the file name so that `Lamp` the Part and `Lamp` the Model can sit side by
+  side, as they can in Studio, and so that finding one doesn't mean opening every file.
+- `index.Script.inst.json` doesn't make a folder a script, because only `index.server.luau`
+  can do that. A script's `.inst.json` left behind by a deleted script is ignored.
+- Other `.json` files, like `package.lock.json`, are skipped.
+- A file that can't be parsed stops the scan, and the server keeps its current tree. A
+  half-saved file therefore can't delete anything from Studio.
+- Deleting a property from a file doesn't reset it in Studio, because properties missing from
+  a patch are left alone. The next change to that instance from Studio writes it back.
+
+### Siblings with the same name
+
+Two siblings with the same name and class can't share a file name. That goes for names that
+differ only by case too, since they'd be the same file on Windows and macOS. The first keeps
+the plain name, and each of the others adds a tag:
+
+```
+src/workspace/
+  Part.Part.inst.json                   { "id": "...", "props": { ... } }
+  Part~3f9a1c2e7b04.Part.inst.json      { "id": "...", "name": "Part", "props": { ... } }
+  Util.luau
+  Util.ModuleScript.inst.json           { "id": "..." }
+  Util~8c1d07f4a2e6.luau
+  Util~8c1d07f4a2e6.ModuleScript.inst.json   { "id": "...", "name": "Util" }
+```
+
+- `id` is the instance's Ref, which a load reuses instead of making a new one. That's how a
+  scan tells the two apart. Only instances with a same-named sibling have one.
+- `name` is there when the file name doesn't say it. It wins over the file name, so a tagged
+  file can be renamed to anything.
+- The tag is a hash of the Ref, not a counter, so that deleting one sibling doesn't rename the
+  others. For the same reason, the survivor keeps its tag when the plain name comes free.
+- A file with an id is the same instance wherever it is. Moving or renaming it by hand moves
+  or renames the instance, instead of deleting it and adding another.
+- A file with no id belongs to the only instance with its name and class, so two of those is
+  an error, and so is two files with the same id. Copying a file makes that error: remove the
+  id from the copy.
 
 ## Wire protocol
 

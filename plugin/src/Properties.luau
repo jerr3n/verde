@@ -268,4 +268,25 @@ function Properties.nonDefault(className: string, props: { [string]: Wire }): { 
 	return out
 end
 
+--[[
+	same string for an instance and a wire instance w/ the same props, for telling
+	same-named siblings apart. ignores values at the class default, since a file may
+	list them and an instance doesn't, and refs, since a file doesn't have them
+]]
+function Properties.signature(className: string, props: { [string]: Wire }): string
+	local withoutRefs: { [string]: Wire } = {}
+	for name, wire in props do
+		if wire.t ~= "Ref" then
+			withoutRefs[name] = wire
+		end
+	end
+
+	local parts = {}
+	for name, wire in Properties.nonDefault(className, withoutRefs) do
+		table.insert(parts, name .. "=" .. Values.fingerprint(wire))
+	end
+	table.sort(parts)
+	return table.concat(parts, "\0")
+end
+
 return Properties

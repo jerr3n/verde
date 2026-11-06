@@ -316,6 +316,60 @@ func TestReconnectSeesWhatStudioWrote(t *testing.T) {
 	}
 }
 
+func TestPartFromStudioReachesDiskWithoutEcho(t *testing.T) {
+	s := startServer(t, map[string]string{"src/.keep": ""})
+	p := s.connect()
+	p.send("patch", protocol.Patch{Added: []protocol.Instance{{
+		ID: "cccccccc-new", Parent: p.ref("W"), Name: "Lamp", Class: "Part",
+		Props: map[string]protocol.Value{"Size": {Type: "Vector3", Value: []byte(`[4,1,2]`)}},
+	}}})
+	s.waitForFile("src/Lamp.Part.inst.json", "{\n  \"props\": {\n    \"Size\": {\"t\":\"Vector3\",\"v\":[4,1,2]}\n  }\n}\n")
+	p.assertQuiet()
+
+	p.send("patch", protocol.Patch{Updated: []protocol.Update{{
+		ID:    "cccccccc-new",
+		Props: map[string]protocol.Value{"Size": {Type: "Vector3", Value: []byte(`[8,1,2]`)}},
+	}}})
+	s.waitForFile("src/Lamp.Part.inst.json", "{\n  \"props\": {\n    \"Size\": {\"t\":\"Vector3\",\"v\":[8,1,2]}\n  }\n}\n")
+	p.assertQuiet()
+}
+
+func TestEditingPartFileReachesPlugin(t *testing.T) {
+	s := startServer(t, map[string]string{
+		"src/Lamp.Part.inst.json": `{"props": {"Anchored": {"t": "Bool", "v": true}}}`,
+	})
+	p := s.connect()
+	lamp := p.ref("Lamp")
+	full := filepath.Join(s.cfg.Root, "src/Lamp.Part.inst.json")
+
+	// only a change in meaning should reach studio
+	if err := os.WriteFile(full, []byte(`{"props":{"Anchored":{"v":true,"t":"Bool"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p.assertQuiet()
+
+	if err := os.WriteFile(full, []byte(`{"props":{"Anchored":{"t":"Bool","v":false}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := p.nextPatch()
+	if len(got.Updated) != 1 || got.Updated[0].ID != lamp || string(got.Updated[0].Props["Anchored"].Value) != "false" {
+		t.Errorf("patch = %+v", got)
+	}
+
+	// a half-saved file keeps the current tree, instead of deleting the part from studio
+	if err := os.WriteFile(full, []byte(`{"props":`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p.assertQuiet()
+
+	if err := os.Remove(full); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.nextPatch(); len(got.Removed) != 1 || got.Removed[0] != lamp {
+		t.Errorf("patch = %+v", got)
+	}
+}
+
 func TestFailedChangeSendsErrorAndKeepsConnection(t *testing.T) {
 	s := startServer(t, map[string]string{"src/Main.luau": "x"})
 	studio := s.connect()

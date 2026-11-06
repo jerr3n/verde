@@ -194,4 +194,10 @@ checked in real Studio:
   time something else on that instance changes.
 - **Things a plugin may not be able to write,** such as `MeshPart.MeshId`, log a warning
   and are skipped. Non-script binary data like Terrain voxels isn't handled.
+- **Properties that point at other instances** aren't stored in files yet, so they're lost
+  on a server restart. Studio keeps its own values, but a place rebuilt from files won't
+  have them, such as `Model.PrimaryPart` or `ObjectValue.Value`.
+- **Same-named siblings that changed while disconnected** pair by position, since what they
+  hold no longer matches. The result on disk or in Studio is still right, but the review may
+  show a change to the wrong one of them.
 - **Crossing edits:** see PROTOCOL.md.

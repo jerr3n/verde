@@ -194,6 +194,81 @@ test("siblings with the same name match one to one", function()
 	check(sync.refs.p1 == a and sync.refs.p2 == b, "should bind in order")
 end)
 
+test("same-named siblings pair by what they hold, not by position", function()
+	local world, sync = setup()
+	local rs = world.service("ReplicatedStorage")
+	local a = world.new("Part", "Part", rs)
+	a.Transparency = 0.25
+	local b = world.new("Part", "Part", rs)
+	b.Transparency = 0.5
+	local c = world.new("Part", "Part", rs)
+	c.Anchored = true
+
+	local plan = sync:plan(snapshot({
+		{ id = "p3", parent = "rs", name = "Part", class = "Part", props = { Anchored = { t = "Bool", v = true } } },
+		{ id = "p2", parent = "rs", name = "Part", class = "Part", props = { Transparency = { t = "Number", v = 0.5 } } },
+		{ id = "p1", parent = "rs", name = "Part", class = "Part", props = { Transparency = { t = "Number", v = 0.25 } } },
+	}))
+
+	check(sync.refs.p1 == a and sync.refs.p2 == b and sync.refs.p3 == c, "should bind by content")
+	eq(#plan.differ, 0, "differences")
+	eq(#plan.diskOnly, 0, "disk only")
+	eq(#plan.studioOnly, 0, "Studio only")
+end)
+
+test("same-named models pair by what's inside them", function()
+	local world, sync = setup()
+	local rs = world.service("ReplicatedStorage")
+	local first = world.new("Model", "Car", rs)
+	world.new("Part", "Wheel", first).Transparency = 0.25
+	local second = world.new("Model", "Car", rs)
+	world.new("Part", "Wheel", second).Transparency = 0.5
+
+	local plan = sync:plan(snapshot({
+		{ id = "m2", parent = "rs", name = "Car", class = "Model" },
+		{ id = "w2", parent = "m2", name = "Wheel", class = "Part", props = { Transparency = { t = "Number", v = 0.5 } } },
+		{ id = "m1", parent = "rs", name = "Car", class = "Model" },
+		{ id = "w1", parent = "m1", name = "Wheel", class = "Part", props = { Transparency = { t = "Number", v = 0.25 } } },
+	}))
+
+	check(sync.refs.m1 == first and sync.refs.m2 == second, "should bind by children")
+	eq(#plan.differ, 0, "differences")
+end)
+
+test("a same-named sibling that really changed is still reported, once", function()
+	local world, sync = setup()
+	local rs = world.service("ReplicatedStorage")
+	local a = world.new("Part", "Part", rs)
+	a.Transparency = 0.25
+	local b = world.new("Part", "Part", rs)
+	b.Transparency = 0.5
+
+	local plan = sync:plan(snapshot({
+		{ id = "p2", parent = "rs", name = "Part", class = "Part", props = { Transparency = { t = "Number", v = 0.75 } } },
+		{ id = "p1", parent = "rs", name = "Part", class = "Part", props = { Transparency = { t = "Number", v = 0.25 } } },
+	}))
+
+	check(sync.refs.p1 == a and sync.refs.p2 == b, "the unchanged one binds first")
+	eq(#plan.differ, 1, "differences")
+	check(plan.differ[1].instance == b, "the one that changed")
+end)
+
+test("a value at its default counts as the same as one left out when pairing", function()
+	local world, sync = setup()
+	local rs = world.service("ReplicatedStorage")
+	local a = world.new("Part", "Part", rs)
+	local b = world.new("Part", "Part", rs)
+	b.Transparency = 0.5
+
+	local plan = sync:plan(snapshot({
+		{ id = "p2", parent = "rs", name = "Part", class = "Part", props = { Transparency = { t = "Number", v = 0.5 } } },
+		{ id = "p1", parent = "rs", name = "Part", class = "Part", props = { Anchored = { t = "Bool", v = false } } },
+	}))
+
+	check(sync.refs.p1 == a and sync.refs.p2 == b, "should bind by content")
+	eq(#plan.differ, 0, "differences")
+end)
+
 test("a class mismatch isn't a match", function()
 	local world, sync = setup()
 	local rs = world.service("ReplicatedStorage")
@@ -721,6 +796,25 @@ test("every value type survives a JSON round trip", function()
 		eq(Values.fingerprint(Values.encode(decoded, noRefs)), Values.fingerprint(wire), typeof(value))
 		eq(typeof(decoded), typeof(value), "type")
 	end
+end)
+
+test("fingerprints ignore a last-bit difference but not a real change", function()
+	local Values = FakeStudio.new().modules.Values
+	local function cframe(r10: number)
+		return Values.fingerprint({ t = "CFrame", v = { 1.5, 2.25, -3.125, 1, 0, 0, r10, 1, 0, 0, 0, 1 } })
+	end
+
+	-- written to a file as the first, decoded by lune's json as the second
+	eq(cframe(-0.41400831937789917), cframe(-0.4140083193778992), "last bit")
+	-- next 32-bit float after 0.1, the smallest change most props can make
+	check(cframe(0.10000000149011612) ~= cframe(0.10000000894069672), "smallest real change")
+
+	local function attribute(value: any)
+		return Values.fingerprint({ t = "Attributes", v = { { "Speed", { t = "Number", v = value } } } })
+	end
+	eq(attribute(0.30000000000000004), attribute(0.3), "inside attributes")
+	check(attribute(1) ~= attribute(2), "attribute changed")
+	check(attribute(1) ~= attribute("1"), "a number and a string aren't the same")
 end)
 
 test("values JSON can't hold are left out instead of failing the message", function()

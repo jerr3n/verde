@@ -231,15 +231,33 @@ function Values.decode(wire: Wire, resolve: (string) -> Instance?): (boolean, an
 	end)
 end
 
+-- copies a wire value w/ its numbers rounded, see Values.fingerprint
+local function withRoundedNumbers(value: any): any
+	if type(value) == "number" then
+		return tonumber(string.format("%.12g", value))
+	elseif type(value) == "table" then
+		local out = {}
+		for key, item in value do
+			out[key] = withRoundedNumbers(item)
+		end
+		return out
+	end
+	return value
+end
+
 --[[
 	A string that is equal for equal wire values. Sources can be large, so they
 	skip JSON encoding.
+
+	numbers are rounded since a value read back from a file can differ from studio's
+	in its last bit, depending on the json decoder. most props are 32-bit floats,
+	which differ by far more than this when they really changed
 ]]
 function Values.fingerprint(wire: Wire): string
 	if wire.t == "String" then
 		return "S" .. (wire.v :: any)
 	end
-	return HttpService:JSONEncode(wire)
+	return HttpService:JSONEncode(withRoundedNumbers(wire))
 end
 
 return Values

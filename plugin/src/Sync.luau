@@ -366,6 +366,89 @@ local function record(name: string, body: () -> ())
 	end
 end
 
+-- what an instance holds, w/ everything under it, to compare with wireSignature
+function Sync:_instanceSignature(instance: Instance): string
+	local children = {}
+	for _, child in instance:GetChildren() do
+		if not self:_isIgnored(child) then
+			table.insert(children, self:_instanceSignature(child))
+		end
+	end
+	table.sort(children)
+	-- refs can't be read yet, and aren't part of a signature anyway
+	local props = Properties.readAll(instance, function(_)
+		return nil
+	end)
+	return `{instance.ClassName}\1{instance.Name}\1{Properties.signature(instance.ClassName, props)}\2{table.concat(
+		children,
+		"\3"
+	)}\4`
+end
+
+local function wireSignature(wire: WireInstance, childrenOf: { [string]: { WireInstance } }): string
+	local children = {}
+	for _, child in (childrenOf[wire.id] or {}) :: { WireInstance } do
+		table.insert(children, wireSignature(child, childrenOf))
+	end
+	table.sort(children)
+	return `{wire.class}\1{wire.name}\1{Properties.signature(wire.class, wire.props or {})}\2{table.concat(
+		children,
+		"\3"
+	)}\4`
+end
+
+--[[
+	pairs same-named siblings that hold the same things. files come back sorted by
+	name, in no order studio knows about, so pairing by position would report
+	differences that aren't there. the caller pairs what's left by position, which
+	is all there is for one that really changed
+
+	keyed by both the wire instance and the child
+]]
+function Sync:_pairSameNamed(
+	wires: { WireInstance },
+	children: { Instance },
+	childrenOf: { [string]: { WireInstance } }
+): { [any]: any }
+	local paired: { [any]: any } = {}
+
+	local wiresByName: { [string]: { WireInstance } } = {}
+	for _, wire in wires do
+		local key = `{wire.name}\0{wire.class}`
+		wiresByName[key] = wiresByName[key] or {}
+		table.insert(wiresByName[key], wire)
+	end
+
+	local childrenByName: { [string]: { Instance } } = {}
+	for _, child in children do
+		local key = `{child.Name}\0{child.ClassName}`
+		if wiresByName[key] and #wiresByName[key] > 1 then
+			childrenByName[key] = childrenByName[key] or {}
+			table.insert(childrenByName[key], child)
+		end
+	end
+
+	for key, sameNamed in childrenByName do
+		if #sameNamed > 1 then
+			local bySignature: { [string]: { Instance } } = {}
+			for _, child in sameNamed do
+				local signature = self:_instanceSignature(child)
+				bySignature[signature] = bySignature[signature] or {}
+				table.insert(bySignature[signature], child)
+			end
+			for _, wire in wiresByName[key] do
+				local candidates = bySignature[wireSignature(wire, childrenOf)]
+				if candidates and #candidates > 0 then
+					local child = table.remove(candidates, 1)
+					paired[wire] = child
+					paired[child] = wire
+				end
+			end
+		end
+	end
+	return paired
+end
+
 --[[
 	Compares a snapshot with Studio without changing any instances. The result
 	says how the two differ; pass it to commit once a side has been chosen.
@@ -407,11 +490,15 @@ function Sync:plan(snapshot: Snapshot): Plan
 
 	local function match(instance: Instance, id: string)
 		local unclaimed = instance:GetChildren()
-		for _, wire in (childrenOf[id] or {}) :: { WireInstance } do
-			local found: Instance?
+		local wires: { WireInstance } = childrenOf[id] or {}
+		local paired = self:_pairSameNamed(wires, unclaimed, childrenOf)
+		for _, wire in wires do
+			local found: Instance? = paired[wire]
 			for index, child in unclaimed do
-				if child.Name == wire.name and child.ClassName == wire.class then
+				if found == nil and child.Name == wire.name and child.ClassName == wire.class and not paired[child] then
 					found = child
+				end
+				if child == found then
 					table.remove(unclaimed, index)
 					break
 				end

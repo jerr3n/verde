@@ -84,7 +84,7 @@ func (t *Tree) Children(id Ref) []Ref {
 }
 
 // SetFileless records whether an instance is missing a file it would normally have, such
-// as a second Script with the same name, or one whose write failed. Diff leaves these
+// as one matching ignore.paths, or one whose write failed. Diff leaves these
 // alone: not finding the file doesn't mean it was deleted, and an older file with the
 // same name doesn't mean its contents changed.
 func (t *Tree) SetFileless(id Ref, fileless bool) {
@@ -255,19 +255,6 @@ func (t *Tree) All() []protocol.Instance {
 	}
 	visit(t.root)
 
-	return out
-}
-
-// appends copies of an instance and everything under it to out, parents first. The
-// top instance gets the given parent, since its real one may be in another tree
-func (t *Tree) appendSubtree(out []protocol.Instance, id, parent Ref) []protocol.Instance {
-	n := t.nodes[id]
-	inst := clone(n.inst)
-	inst.Parent = parent
-	out = append(out, inst)
-	for _, child := range n.children {
-		out = t.appendSubtree(out, child, id)
-	}
 	return out
 }
 

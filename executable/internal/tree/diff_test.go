@@ -138,8 +138,8 @@ func TestDiffClassChangeReplacesInstance(t *testing.T) {
 	})
 }
 
-// A scan can't see a Part from Studio, so not finding one doesn't mean it was deleted.
-func TestDiffKeepsClassesNotOnDisk(t *testing.T) {
+// every class has a file now, so not finding a part means it was deleted
+func TestDiffRemovesAnyClassGoneFromDisk(t *testing.T) {
 	cur := buildTree(t, "game",
 		protocol.Instance{ID: "rs", Parent: "game", Name: "ReplicatedStorage", Class: "ReplicatedStorage"},
 		protocol.Instance{ID: "part", Parent: "rs", Name: "Lamp", Class: "Part"},
@@ -148,13 +148,13 @@ func TestDiffKeepsClassesNotOnDisk(t *testing.T) {
 		protocol.Instance{ID: "rs2", Parent: "game2", Name: "ReplicatedStorage", Class: "ReplicatedStorage"},
 	)
 
-	assertPatch(t, Diff(cur, next), protocol.Patch{})
+	assertPatch(t, Diff(cur, next), protocol.Patch{Removed: []Ref{"part"}})
 }
 
-// A scan can't see tags or attributes either, so they aren't removed or sent.
+// a scan can't see refs, so they aren't removed or sent
 func TestDiffKeepsPropsNotOnDisk(t *testing.T) {
 	props := source("a")
-	props["$tags"] = protocol.Value{Type: "Tags", Value: []byte(`["TagA"]`)}
+	props["PrimaryPart"] = protocol.Value{Type: "Ref", Value: []byte(`"some-ref"`)}
 	cur := buildTree(t, "game",
 		protocol.Instance{ID: "rs", Parent: "game", Name: "ReplicatedStorage", Class: "ReplicatedStorage"},
 		protocol.Instance{ID: "foo", Parent: "rs", Name: "Foo", Class: "Script", Props: props},
@@ -183,6 +183,34 @@ func TestDiffIgnoresStringEscaping(t *testing.T) {
 	)
 
 	assertPatch(t, Diff(cur, next), protocol.Patch{})
+}
+
+// a file can hold the same value in different json. treating that as a change would send
+// an update to studio on every scan
+func TestDiffIgnoresValueFormatting(t *testing.T) {
+	sameValues := []struct{ a, b string }{
+		{`[1,2,3]`, `[1, 2, 3]`},
+		{`[1.0,2]`, `[1,2.0]`},
+		{`["a<b",{"t":"Number","v":1}]`, `["a<b", {"v":1,"t":"Number"}]`},
+	}
+	for _, tc := range sameValues {
+		a := protocol.Value{Type: "Vector3", Value: []byte(tc.a)}
+		b := protocol.Value{Type: "Vector3", Value: []byte(tc.b)}
+		if !sameValue(a, b) {
+			t.Errorf("%s and %s should be the same", tc.a, tc.b)
+		}
+	}
+
+	a := protocol.Value{Type: "Vector3", Value: []byte(`[1,2,3]`)}
+	if sameValue(a, protocol.Value{Type: "Vector3", Value: []byte(`[1,2,4]`)}) {
+		t.Error("different numbers should differ")
+	}
+	if sameValue(a, protocol.Value{Type: "Color3", Value: []byte(`[1,2,3]`)}) {
+		t.Error("different types should differ")
+	}
+	if !sameValue(protocol.Value{Type: "Nil"}, protocol.Value{Type: "Nil"}) {
+		t.Error("Nil has no value, and should equal itself")
+	}
 }
 
 // Applying a patch should leave the tree matching the scan, with nothing left to send.
@@ -264,4 +292,105 @@ func TestDiffSameNameSiblingsMatchTheOneWithTheFile(t *testing.T) {
 			Updated: []protocol.Update{{ID: "withFile", Props: source("edited")}},
 		})
 	}
+}
+
+func TestDiffStoredRefs(t *testing.T) {
+	rs := protocol.Instance{ID: "rs", Parent: "game", Name: "R", Class: "R"}
+	rs2 := protocol.Instance{ID: "rs2", Parent: "game2", Name: "R", Class: "R"}
+	part := func(id, parent Ref, name string) protocol.Instance {
+		return protocol.Instance{ID: id, Parent: parent, Name: name, Class: "Part"}
+	}
+
+	t.Run("same-named siblings match by Ref, not order", func(t *testing.T) {
+		cur := buildTree(t, "game", rs, part("a", "rs", "Part"), part("b", "rs", "Part"))
+		next := buildTree(t, "game2", rs2, part("b", "rs2", "Part"), part("a", "rs2", "Part"))
+		next.Update(protocol.Update{ID: "b", Props: source("edited")})
+
+		assertPatch(t, Diff(cur, next), protocol.Patch{
+			Updated: []protocol.Update{{ID: "b", Props: source("edited")}},
+		})
+	})
+
+	t.Run("a stored Ref and one with no id", func(t *testing.T) {
+		cur := buildTree(t, "game", rs, part("a", "rs", "Part"), part("b", "rs", "Part"))
+		next := buildTree(t, "game2", rs2, part("random", "rs2", "Part"), part("b", "rs2", "Part"))
+
+		assertPatch(t, Diff(cur, next), protocol.Patch{})
+	})
+
+	t.Run("gone from disk is removed", func(t *testing.T) {
+		cur := buildTree(t, "game", rs, part("a", "rs", "Part"), part("b", "rs", "Part"))
+		next := buildTree(t, "game2", rs2, part("a", "rs2", "Part"))
+
+		assertPatch(t, Diff(cur, next), protocol.Patch{Removed: []Ref{"b"}})
+	})
+
+	t.Run("a moved file moves the instance", func(t *testing.T) {
+		folder := func(id, parent Ref) protocol.Instance {
+			return protocol.Instance{ID: id, Parent: parent, Name: "lib", Class: "Folder"}
+		}
+		cur := buildTree(t, "game", rs, folder("dir", "rs"), part("a", "dir", "Part"))
+		next := buildTree(t, "game2", rs2, folder("dir2", "rs2"), part("a", "rs2", "Tire"))
+
+		assertPatch(t, Diff(cur, next), protocol.Patch{
+			Updated: []protocol.Update{{ID: "a", Parent: "rs", Name: "Tire"}},
+		})
+	})
+
+	t.Run("moving into a new folder adds the folder first", func(t *testing.T) {
+		cur := buildTree(t, "game", rs, part("a", "rs", "Part"))
+		next := buildTree(t, "game2", rs2,
+			protocol.Instance{ID: "new", Parent: "rs2", Name: "lib", Class: "Folder"},
+			part("a", "new", "Part"),
+		)
+
+		assertPatch(t, Diff(cur, next), protocol.Patch{
+			Added:   []protocol.Instance{{ID: "new", Parent: "rs", Name: "lib", Class: "Folder"}},
+			Updated: []protocol.Update{{ID: "a", Parent: "new"}},
+		})
+	})
+
+	t.Run("moving out of a removed folder keeps the instance", func(t *testing.T) {
+		cur := buildTree(t, "game", rs,
+			protocol.Instance{ID: "dir", Parent: "rs", Name: "lib", Class: "Folder"},
+			part("a", "dir", "Part"),
+		)
+		next := buildTree(t, "game2", rs2, part("a", "rs2", "Part"))
+
+		patch := Diff(cur, next)
+		assertPatch(t, patch, protocol.Patch{
+			Updated: []protocol.Update{{ID: "a", Parent: "rs"}},
+			Removed: []Ref{"dir"},
+		})
+		if err := cur.Apply(patch); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := cur.Get("a"); !ok {
+			t.Error("a should still exist")
+		}
+	})
+
+	t.Run("swapping parents can't make a cycle", func(t *testing.T) {
+		cur := buildTree(t, "game", rs, part("a", "rs", "A"), part("b", "a", "B"))
+		next := buildTree(t, "game2", rs2, part("b", "rs2", "B"), part("a", "b", "A"))
+
+		if err := cur.Apply(Diff(cur, next)); err != nil {
+			t.Fatal(err)
+		}
+		assertPatch(t, Diff(cur, next), protocol.Patch{})
+	})
+
+	t.Run("a changed class can't reuse the Ref", func(t *testing.T) {
+		cur := buildTree(t, "game", rs, part("a", "rs", "Lamp"))
+		next := buildTree(t, "game2", rs2, protocol.Instance{ID: "a", Parent: "rs2", Name: "Lamp", Class: "Model"})
+
+		patch := Diff(cur, next)
+		if len(patch.Added) != 1 || patch.Added[0].ID == "a" || len(patch.Removed) != 1 || patch.Removed[0] != "a" {
+			t.Fatalf("patch = %+v", patch)
+		}
+		if err := cur.Apply(patch); err != nil {
+			t.Fatal(err)
+		}
+		assertPatch(t, Diff(cur, next), protocol.Patch{})
+	})
 }

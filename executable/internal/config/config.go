@@ -1,8 +1,15 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
+	"path/filepath"
+	"slices"
+	"strconv"
+	"strings"
 
 	"go.yaml.in/yaml/v4"
 )
@@ -35,11 +42,20 @@ sync:
     path: src/lighting
 ignore:
   paths: ["**\/*.tmp", "**\/.DS_Store"]
-instances: ["Workspace/Camera", "Workspace/Terrain"]
+  instances: ["Workspace/Camera", "Workspace/Terrain"]
 
 conflicts:
-onConnect: disk # disk | studio | interactive
+  onConnect: disk # disk | studio | interactive
 */
+
+const (
+	// DefaultPath is the config file `verde serve` looks for in the working directory.
+	DefaultPath = "project.yml"
+	// CurrentVersion is the only config version this build understands.
+	CurrentVersion = 0
+
+	defaultAddress = "127.0.0.1"
+)
 
 type OnConnect string
 
@@ -51,28 +67,38 @@ const (
 
 type SyncInstance struct {
 	Instance string `yaml:"instance"`
-	Path     string `yaml:"path"`
+	// Path is cleaned by Load and relative to Cfg.Root.
+	Path string `yaml:"path"`
 }
 
 type Cfg struct {
+	// Root is the absolute path of the directory holding the config file.
+	Root string `yaml:"-"`
+
 	Version int    `yaml:"version"`
 	Name    string `yaml:"name"`
 	Serve   struct {
-		Address  string `yaml:"address"`
-		Port     int    `yaml:"port"`
-		PlaceIds []int  `yaml:"placeIds"`
+		Address  string  `yaml:"address"`
+		Port     int     `yaml:"port"`
+		PlaceIds []int64 `yaml:"placeIds"`
 	} `yaml:"serve"`
 	Sync   []SyncInstance `yaml:"sync"`
 	Ignore struct {
 		Paths     []string `yaml:"paths"`
 		Instances []string `yaml:"instances"`
 		Classes   []string `yaml:"classes"`
-	}
+	} `yaml:"ignore"`
 	Conflicts struct {
 		OnConnect OnConnect `yaml:"onConnect"`
 	} `yaml:"conflicts"`
 }
 
+// Addr returns the host:port the server should listen on.
+func (c *Cfg) Addr() string {
+	return net.JoinHostPort(c.Serve.Address, strconv.Itoa(c.Serve.Port))
+}
+
+// Load reads the config file at path, applies defaults and validates it.
 func Load(path string) (*Cfg, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -84,7 +110,105 @@ func Load(path string) (*Cfg, error) {
 	dec := yaml.NewDecoder(file)
 	dec.KnownFields(true)
 	if err := dec.Decode(&cfg); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("parse %s: file is empty", path)
+		}
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
+
+	cfg.Root, err = filepath.Abs(filepath.Dir(path))
+	if err != nil {
+		return nil, fmt.Errorf("resolve %s: %w", path, err)
+	}
+
+	cfg.applyDefaults()
+	if err := cfg.validate(); err != nil {
+		return nil, fmt.Errorf("invalid %s: %w", path, err)
+	}
 	return &cfg, nil
+}
+
+func (c *Cfg) applyDefaults() {
+	if c.Serve.Address == "" {
+		c.Serve.Address = defaultAddress
+	}
+	if c.Conflicts.OnConnect == "" {
+		c.Conflicts.OnConnect = OnConnectDisk
+	}
+}
+
+func (c *Cfg) validate() error {
+	if c.Version != CurrentVersion {
+		return fmt.Errorf("version: unsupported version %d (expected %d)", c.Version, CurrentVersion)
+	}
+	if c.Serve.Port < 1 || c.Serve.Port > 65535 {
+		return fmt.Errorf("serve.port: %d is not between 1 and 65535", c.Serve.Port)
+	}
+	switch c.Conflicts.OnConnect {
+	case OnConnectDisk, OnConnectStudio, OnConnectInteractive:
+	default:
+		return fmt.Errorf("conflicts.onConnect: %q is not disk, studio or interactive", c.Conflicts.OnConnect)
+	}
+	if len(c.Sync) == 0 {
+		return errors.New("sync: need at least one entry")
+	}
+
+	for i := range c.Sync {
+		entry := &c.Sync[i]
+
+		if err := validateInstance(entry.Instance); err != nil {
+			return fmt.Errorf("sync[%d].instance: %w", i, err)
+		}
+		cleaned, err := cleanPath(entry.Path)
+		if err != nil {
+			return fmt.Errorf("sync[%d].path: %w", i, err)
+		}
+		entry.Path = cleaned
+
+		for j, earlier := range c.Sync[:i] {
+			if err := checkOverlap(entry.Instance, earlier.Instance, "/"); err != nil {
+				return fmt.Errorf("sync[%d].instance: %w with sync[%d]", i, err, j)
+			}
+			if err := checkOverlap(entry.Path, earlier.Path, string(filepath.Separator)); err != nil {
+				return fmt.Errorf("sync[%d].path: %w with sync[%d]", i, err, j)
+			}
+		}
+	}
+	return nil
+}
+
+func validateInstance(instance string) error {
+	if slices.Contains(strings.Split(instance, "/"), "") {
+		return fmt.Errorf("%q is not a /-separated instance path", instance)
+	}
+	return nil
+}
+
+// cleanPath normalizes a sync path and requires it to be a folder inside the
+// project. The check is on the text of the path, so it doesn't follow symlinks.
+func cleanPath(path string) (string, error) {
+	if path == "" {
+		return "", errors.New("is empty")
+	}
+	cleaned := filepath.Clean(path)
+	if !filepath.IsLocal(cleaned) {
+		return "", fmt.Errorf("%q is outside the project", path)
+	}
+	if cleaned == "." {
+		return "", fmt.Errorf("%q is the project root, not a folder inside it", path)
+	}
+	return cleaned, nil
+}
+
+// checkOverlap rejects two sync targets that are the same, or where one is
+// inside the other. Files would otherwise be synced twice, and the plugin would
+// treat a nested mount as an instance that exists only in Studio.
+func checkOverlap(a, b, separator string) error {
+	switch {
+	case a == b:
+		return fmt.Errorf("%q is a duplicate", a)
+	case strings.HasPrefix(a, b+separator), strings.HasPrefix(b, a+separator):
+		return fmt.Errorf("%q and %q overlap", a, b)
+	}
+	return nil
 }

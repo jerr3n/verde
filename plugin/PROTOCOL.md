@@ -134,7 +134,7 @@ Studio and gives it a new Ref. That's fine at first. Detecting real renames can 
 ### 10. Finish
 
 - [ ] Write non-script instances and properties to disk (see below).
-- [ ] Add a `verde init` command that generates `project.yml`.
+- [x] Add a `verde init` command that generates `project.yml`.
 - [ ] Add end-to-end Go tests that connect as a plugin and check the messages and files.
 - [ ] Run the manual Studio checks in `README.md`.
 - [ ] Test large projects. Roblox doesn't document a message size limit, so big snapshots

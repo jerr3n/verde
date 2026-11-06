@@ -13,71 +13,48 @@ sends a snapshot, applies patches, and keeps disk in step.
 
 ## Backend to-do
 
-**Already done:** the `verde serve` command, logging, and a `/ws` route that only
-echoes messages.
+**Already done:** the `verde serve` command, logging, config loading, and a `/ws` route
+that only echoes messages.
 
 ### 1. Fix the module
 
-- [ ] Run `go mod tidy`. Until then, `go build` fails with `updates to go.mod needed`.
+- [x] Run `go mod tidy`.
 - [ ] Decide whether to stay on `go.yaml.in/yaml/v4`, which is a release candidate
       (`v4.0.0-rc.9`).
 
 ### 2. Finish `internal/config`
 
-- [ ] Fix the panic. `ParseCfg` passes a nil `*Cfg` to `yaml.Unmarshal`, so every
-      valid config crashes with `reflect.Value.Set using unaddressable value`.
-- [ ] Take the path as an argument. The code opens `verde.yml`, but the sample is
-      `verde_config.yml`, so pick one name as the default.
-- [ ] Reject unknown fields, so a typo like `prot:` is an error instead of being ignored:
-      ```go
-      var cfg Cfg
-      dec := yaml.NewDecoder(file)
-      dec.KnownFields(true)
-      if err := dec.Decode(&cfg); err != nil {
-          return nil, fmt.Errorf("parse %s: %w", path, err)
-      }
-      ```
-- [ ] Report an empty file clearly. `Decode` returns a bare `EOF` for one.
-- [ ] Validate after parsing:
-  - `version` is supported.
-  - `port` is 1–65535.
-  - `onConnect` is `disk`, `studio` or `interactive`. Empty means `disk`.
-  - `sync` isn't empty, and no instance or path appears twice.
-  - Every `sync` path stays inside the project (`filepath.IsLocal`). `../../outside`
-    currently parses without error.
-- [ ] Default `address` to `127.0.0.1`.
-- [ ] Resolve `sync` paths against the config file's directory, not the working directory.
-- [ ] Add the missing `yaml:"ignore"` tag, to match the other fields.
-- [ ] Fix the sample in the comment. `ignore.instances` and `conflicts.onConnect` lost
-      their indentation, and strict parsing rejects that shape.
-- [ ] Add tests: valid sample, missing file, empty file, unknown field, each invalid value.
+- [x] `config.Load(path)` parses strictly, applies defaults and validates. Unknown fields,
+      unsupported versions, invalid ports and `onConnect` values, and overlapping or
+      escaping `sync` entries are errors.
+- [x] `address` defaults to `127.0.0.1`, and `onConnect` defaults to `disk`.
+- [x] `Cfg.Root` holds the config file's directory. Join it with each cleaned `sync` path
+      to get the real location, instead of using the working directory.
+- [x] Tests in `internal/config/config_test.go`.
+- [ ] Check that `ignore.paths` patterns are valid with `doublestar.ValidatePattern` when
+      adding `doublestar` in step 6.
+- [ ] Resolve symlinks before touching files in steps 6–9. The `sync` path check only looks
+      at the text of the path, so a symlink inside the project could still lead outside it.
 
 ### 3. Use the config in `serve`
 
-- [ ] Load the config at startup and listen on `net.JoinHostPort(address, port)`.
-- [ ] Remove the hardcoded `:8080` and the `PORT` lookup, which listen on all interfaces.
-      Clients aren't authenticated and will be able to change files on disk.
+- [x] Load `project.yml` at startup and listen on `Cfg.Addr()`.
+- [x] Remove the hardcoded `:8080` and the `PORT` lookup.
 - [ ] Replace `log.Printf` in the WebSocket code with the zap logger.
 
 ### 4. Add `internal/protocol`
 
-- [ ] Add the types from [Go types](#go-types).
-- [ ] Always use non-nil slices for `Mount.Path`, `Snapshot.Mounts` and
-      `Snapshot.Instances`. A nil slice encodes as `null`, and the plugin rejects a
-      snapshot whose `mounts` or `instances` isn't a list.
+- [x] Add the types from [Go types](#go-types).
 
 ### 5. Add `internal/tree`
 
-- [ ] Write the tree as a package using the protocol types: a map from Ref to instance,
-      with insert, remove, reparent (rejecting cycles) and walk. `google/uuid` works for
-      generating Refs.
-- [ ] Make removing an unknown Ref a no-op.
-- [ ] Accept Refs made by the plugin, and generate new ones only for instances from disk.
-- [ ] Add an update method for a partial change: name, parent and merged properties.
-- [ ] Store a `Nil` property as `Nil` instead of deleting it. A property missing from a
+- [x] Write the tree as a package using the protocol types: a map from Ref to instance,
+      with insert, update, remove and a parents-first list.
+- [x] Make removing an unknown Ref a no-op.
+- [x] Accept Refs made by the plugin.
+- [x] Store a `Nil` property as `Nil` instead of deleting it. A property missing from a
       snapshot is left alone in Studio, so deleting it would hide the change on reconnect.
-- [ ] Add a method that lists instances parents-first.
-- [ ] Add tests for moves, cycles, subtree removal and repeated removal.
+- [x] Add tests for moves, cycles, subtree removal and repeated removal.
 
 ### 6. Add `internal/project` (disk → tree)
 
@@ -86,6 +63,10 @@ echoes messages.
       a target with `sync: false`, and each `sync` target with `sync: true`. For
       `StarterPlayer/StarterPlayerScripts`, that means `StarterPlayer` is `false` and
       `StarterPlayerScripts` is `true`.
+- [ ] Generate a new Ref for each instance read from disk. `google/uuid` works for this.
+- [ ] Always use non-nil slices for `Mount.Path`, `Snapshot.Mounts` and
+      `Snapshot.Instances`. A nil slice encodes as `null`, and the plugin rejects a
+      snapshot whose `mounts` or `instances` isn't a list.
 - [ ] Read each `sync` path into instances. Skip whatever matches `ignore.paths`, using
       `doublestar`.
 - [ ] Filter `ignore.instances` and `ignore.classes` out of the snapshot. The plugin only
@@ -151,7 +132,7 @@ Studio and gives it a new Ref. That's fine at first. Detecting real renames can 
 ### 10. Finish
 
 - [ ] Write non-script instances and properties to disk (see below).
-- [ ] Add a `verde init` command that generates `verde_config.yml`.
+- [ ] Add a `verde init` command that generates `project.yml`.
 - [ ] Add end-to-end Go tests that connect as a plugin and check the messages and files.
 - [ ] Run the manual Studio checks in `README.md`.
 - [ ] Test large projects. Roblox doesn't document a message size limit, so big snapshots
@@ -167,7 +148,6 @@ Studio and gives it a new Ref. That's fine at first. Detecting real renames can 
 | Siblings with the same name | Add a stable suffix to the file name and store the real name inside. Studio allows many children named `Part`, but they can't share a path |
 | Empty `placeIds` | Allow any place |
 | `placeId` 0 (unpublished place) | Allow it only when `placeIds` is empty |
-| Config file name | `verde_config.yml`, matching the sample |
 
 The plugin matches same-named siblings by name and class, in the order they're listed.
 Keep that order stable between connects, or their properties can get swapped.

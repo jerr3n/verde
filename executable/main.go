@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -15,41 +14,6 @@ import (
 	"github.com/urfave/cli/v3"
 	"go.uber.org/zap"
 )
-
-func parseCfg() (*config.Cfg, error) {
-	load, err := config.Load("project.yml")
-	if err != nil {
-		return nil, err
-	}
-	if load.Serve.Address == "" {
-		load.Serve.Address = "127.0.0.1"
-	}
-	if load.Serve.Port < 1 || load.Serve.Port > 65535 {
-		return nil, errors.New("invalid port")
-	}
-	if load.Conflicts.OnConnect == "" {
-		load.Conflicts.OnConnect = config.OnConnectDisk
-	}
-	if load.Conflicts.OnConnect != config.OnConnectDisk && load.Conflicts.OnConnect != config.OnConnectStudio && load.Conflicts.OnConnect != config.OnConnectInteractive {
-		return nil, errors.New("invalid onconnect value")
-	}
-	if len(load.Sync) == 0 {
-		return nil, errors.New("need at least one sync value")
-	}
-	paths := map[string]bool{}
-	instances := map[string]bool{}
-	for i, sync := range load.Sync {
-		if paths[sync.Path] {
-			return nil, fmt.Errorf("duplicate path <%s> at element %d", sync.Path, i)
-		}
-		if instances[sync.Instance] {
-			return nil, fmt.Errorf("duplicate instance <%s> at element %d", sync.Instance, i)
-		}
-		paths[sync.Path] = true
-		instances[sync.Instance] = true
-	}
-	return load, nil
-}
 
 func handleWs(c *gin.Context) {
 	conn, err := websocket.Accept(c.Writer, c.Request, nil)
@@ -122,11 +86,11 @@ func main() {
 			{
 				Name: "serve",
 				Action: func(ctx context.Context, command *cli.Command) error {
-					addr := ":8080"
-					if port := os.Getenv("PORT"); port != "" { // same default as gin's r.Run()
-						addr = ":" + port
+					cfg, err := config.Load(config.DefaultPath)
+					if err != nil {
+						return err
 					}
-					return serve(logger, addr)
+					return serve(logger, cfg.Addr())
 				},
 			},
 		},

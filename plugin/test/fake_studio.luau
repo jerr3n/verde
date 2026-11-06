@@ -19,7 +19,7 @@ local Color3 = roblox.Color3
 
 local FakeStudio = {}
 
-local MODULE_NAMES = { "Values", "Properties", "Sync", "Connection", "Session" }
+local MODULE_NAMES = { "Values", "Properties", "Sync", "Connection", "Notifications", "Session" }
 
 -- Read up front, because reading a file can't yield inside a metamethod.
 local sources: { [string]: string } = {}

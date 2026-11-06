@@ -107,7 +107,7 @@ For each `patch` from the plugin:
 - [x] Never build a path directly from an instance name. Names are percent-encoded (see
       [Names on disk](#names-on-disk)).
 - [x] Forward the patch to every other connected plugin, but not to the sender.
-- [x] If a write fails, log it and send `error`. The plugin only warns and doesn't undo
+- [x] If a write fails, log it and send `error`. The plugin warns the user and doesn't undo
       anything, so the two sides now differ until the user reconnects.
 
 **Milestone:** edit, rename, add and delete in Studio, and see the files change.
@@ -197,8 +197,8 @@ message an `ack` or `error` refers to.
 The plugin sends `ack` for every patch it applies and ignores `ack`s it receives, so the
 backend can ignore them too and doesn't need to send any.
 
-After a snapshot has arrived, the plugin only logs an `error` as a warning and stays
-connected. Before that, it shows the message and disconnects.
+After a snapshot has arrived, the plugin logs an `error` as a warning, shows it as a
+notification and stays connected. Before that, it shows the message and disconnects.
 
 ### Connecting
 

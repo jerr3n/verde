@@ -31,13 +31,19 @@ To exercise the rest:
 - **Server → Studio:** type `source print("hi")`, `rename Other`, `add Thing` or
   `remove` into the mock server. Studio updates, with no patch echoed back.
 - **Choosing a side:** start it with `VERDE_ON_CONNECT=interactive` or `studio`.
+- **Notifications:** `error <text>` reports a server error, `burst 5` sends quick
+  changes that merge into one pop-up, `bad` sends a patch that fails to apply, and
+  `quit` stops the server so the connection drops.
 
 ## How it works
 
 | Module | Job |
 |---|---|
 | `init.server.luau` | Entry point. Exits during Play, then runs the main loop |
-| `Ui` | Theme-aware, scrollable panel: server address, connection status and sync review |
+| `Ui` | The panel's Sync, Activity and Settings tabs |
+| `Ui/Toasts` | Pop-up notifications over the 3D view |
+| `Ui/Kit`, `Ui/Theme` | Shared building blocks, and colors that follow Studio's theme |
+| `Notifications` | The activity history and unread count, with no UI of its own |
 | `Session` | Connection lifecycle and message handling |
 | `Connection` | The WebSocket |
 | `Sync` | Compares and applies: the core of the plugin |
@@ -57,6 +63,41 @@ including whether keeping Studio will delete files on disk.
 
 Incoming messages go into a queue, and one loop handles them every 0.1 seconds.
 Applying a change can yield, so a single loop keeps patches from interleaving.
+
+### Notifications
+
+`Session` reports what happens as notices, and `Ui` decides how to show them. Every
+notice goes in the **Activity** tab, which keeps the last 100. Pop-ups appear in the
+corner of the 3D view, even with the panel closed.
+
+| What happened | Pop-up | Lasts |
+|---|---|---|
+| Connected, disconnected | Yes | A few seconds |
+| Couldn't reach the server, connection lost, connection refused | Yes, with **Reconnect** | Until dismissed |
+| Disk and Studio need a decision | Yes, with **Review**. Also opens the panel | Until answered |
+| No snapshot after 5 seconds | Yes | Until it arrives |
+| Server error, a change that couldn't be applied or sent | Yes | 12 seconds |
+| Missing sync folder, instances only in Studio | Yes | 8 seconds |
+| A change from disk | Yes, can be turned off in Settings | 3 seconds |
+| A change sent to disk | No, this would pop up on every pause in typing | |
+
+Changes within 5 seconds of each other merge into one notification with running
+counts. Hovering over a pop-up holds it open, and clicking it opens the panel.
+**Reconnect** only runs when clicked, so the plugin still never reconnects on its own.
+
+Studio only draws pop-ups over the 3D view, so they can't be seen from a script tab.
+For that case, the panel's title shows the number of unread problems, as in
+`Verde (2)`. Warnings still go to Output as well.
+
+### The logo
+
+The logo is uploaded as a Decal, and `rbxassetid://` needs an Image ID, so `Kit.LOGO`
+uses `rbxthumb://` with the Decal's ID. To find the Image ID behind a Decal, run this in
+the command bar:
+
+```lua
+print(game:GetService("InsertService"):LoadAsset(107008526393062):FindFirstChildWhichIsA("Decal", true).Texture)
+```
 
 ### Connecting to a project
 
@@ -116,13 +157,16 @@ lune run test/ui.luau
 
 The first suite runs the real sync modules against a fake Studio
 (`test/fake_studio.luau`), using real Roblox data types and deferred events. The UI
-suite checks address validation, keyboard connection, cancellation, status and
-choice handling, theme changes, and cleanup against real Roblox instance property
-types with fake plugin events. `init.server.luau` isn't covered.
+suite checks the panel, activity feed, pop-ups and settings against real Roblox
+instance property types with fake plugin events and tweens. `init.server.luau` isn't
+covered.
 
-Lune doesn't render UI. In Studio, also check the panel in light and dark themes,
-resize it to a narrow, short dock, and verify that long errors wrap and the full
-sync review scrolls into view.
+Lune doesn't render UI. In Studio, also check:
+
+- The panel in light and dark themes, resized to a narrow, short dock. Long errors
+  should wrap, and the full sync review should scroll into view.
+- The logo shows in the panel header and on the toolbar button.
+- Pop-ups slide in at the bottom right of the 3D view, and their buttons work.
 
 It can't catch wrong assumptions about Studio itself. These still have to be
 checked in real Studio:

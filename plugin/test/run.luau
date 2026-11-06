@@ -844,6 +844,7 @@ local function sessionSetup()
 	local callbacks: any = nil
 	local statuses = {}
 	local choices = {}
+	local notices = {}
 	local closedByPlugin = false
 
 	local session = world.modules.Session.new({
@@ -852,6 +853,9 @@ local function sessionSetup()
 		end,
 		onChoice = function(summary)
 			table.insert(choices, summary)
+		end,
+		onNotice = function(notice)
+			table.insert(notices, notice)
 		end,
 	}, function(_, given)
 		callbacks = given
@@ -876,6 +880,16 @@ local function sessionSetup()
 		outbox = outbox,
 		statuses = statuses,
 		choices = choices,
+		notices = notices,
+		-- The newest notice with this key, leaving out requests to dismiss.
+		notice = function(key: string)
+			for index = #notices, 1, -1 do
+				if notices[index].key == key then
+					return notices[index]
+				end
+			end
+			return nil
+		end,
 		receive = receive,
 		open = function()
 			session:connect("ws://test")
@@ -1056,6 +1070,258 @@ test("a broken message doesn't stop the session", function()
 	eq(t.lastStatus().status, "connected", "status")
 	check(t.world.service("ReplicatedStorage"):FindFirstChild("Ok") ~= nil, "later patch applied")
 	eq(t.world.openRecordings, 0, "open recordings")
+end)
+
+--------------------------------------------------------------------------------
+-- Notices
+--------------------------------------------------------------------------------
+
+-- A session that has finished connecting, with its notices so far cleared.
+local function connectedSession(instances: { any }?)
+	local t = sessionSetup()
+	t.open()
+	t.receive("snapshot", snapshot(instances or {}))
+	t.session:tick(os.clock())
+	table.clear(t.notices)
+	return t
+end
+
+test("connecting reports what the first sync did", function()
+	local t = sessionSetup()
+	t.open()
+	t.receive("snapshot", snapshot({ module("one", "One", ""), module("two", "Two", "") }))
+	t.session:tick(os.clock())
+	local notice = t.notice("connection")
+	eq(notice.kind, "success", "kind")
+	eq(notice.title, "Connected", "title")
+	eq(notice.detail, "Applied from disk: 2 instances added.", "detail")
+end)
+
+test("connecting counts differing properties with the right plural", function()
+	local t = sessionSetup()
+	t.open()
+	local rs = t.world.service("ReplicatedStorage")
+	t.world.new("ModuleScript", "A", rs, { Source = "old" })
+	t.world.new("ModuleScript", "B", rs, { Source = "old" })
+	t.receive("snapshot", snapshot({ module("a", "A", "new"), module("b", "B", "new") }))
+	t.session:tick(os.clock())
+	eq(t.notice("connection").detail, "Applied from disk: 2 properties updated.", "detail")
+end)
+
+test("connecting with nothing to do says so", function()
+	local t = sessionSetup()
+	t.open()
+	t.receive("snapshot", snapshot({}))
+	t.session:tick(os.clock())
+	eq(t.notice("connection").detail, "Studio already matched disk.", "detail")
+end)
+
+test("a connection that never opens points at the server", function()
+	local t = sessionSetup()
+	t.session:connect("ws://test")
+	t.serverClosed("refused (status 0)")
+	t.session:tick(os.clock())
+	eq(t.lastStatus().status, "disconnected", "status")
+	local notice = t.notice("connection")
+	eq(notice.kind, "error", "kind")
+	eq(notice.title, "Couldn't reach the server", "title")
+	check(string.find(notice.detail, "verde serve", 1, true), "should mention the command")
+	check(string.find(notice.detail, "refused", 1, true), "should keep the reason")
+	eq(notice.sticky, true, "sticky")
+	eq(notice.action, "reconnect", "action")
+end)
+
+test("losing a live connection is a sticky error offering reconnect", function()
+	local t = connectedSession()
+	t.serverClosed(nil)
+	t.session:tick(os.clock())
+	local notice = t.notice("connection")
+	eq(notice.title, "Connection lost", "title")
+	eq(notice.detail, "The server closed the connection.", "detail")
+	eq(notice.sticky, true, "sticky")
+	eq(notice.action, "reconnect", "action")
+	eq(t.session:info(), nil, "no live info after closing")
+end)
+
+test("disconnecting by hand is a quiet info, and cancelling just clears", function()
+	local t = connectedSession()
+	t.session:disconnect()
+	eq(t.notice("connection").kind, "info", "kind")
+	eq(t.notice("connection").sticky, nil, "sticky")
+
+	local pending = sessionSetup()
+	pending.session:connect("ws://test")
+	table.clear(pending.notices)
+	pending.session:disconnect()
+	eq(#pending.notices, 1, "notices")
+	eq(pending.notices[1].dismiss, "connection", "dismiss")
+end)
+
+test("reconnecting clears the old connection pop-up", function()
+	local t = connectedSession()
+	t.serverClosed("gone")
+	t.session:tick(os.clock())
+	t.session:connect("ws://test")
+	eq(t.notices[#t.notices].dismiss, "connection", "dismiss")
+end)
+
+test("a slow server warns once", function()
+	local t = sessionSetup()
+	t.open()
+	t.session:tick(os.clock() + 60)
+	t.session:tick(os.clock() + 61)
+	local warnings = 0
+	for _, notice in t.notices do
+		if notice.title == "Still waiting for the project" then
+			warnings += 1
+		end
+	end
+	eq(warnings, 1, "warnings")
+end)
+
+test("a choice asks for review and is sticky", function()
+	local t = sessionSetup()
+	t.open()
+	t.receive("snapshot", snapshot({ module("disk", "Disk", "") }, { onConnect = "interactive" }))
+	t.session:tick(os.clock())
+	local notice = t.notice("connection")
+	eq(notice.title, "Review needed", "title")
+	eq(notice.action, "review", "action")
+	eq(notice.sticky, true, "sticky")
+
+	t.session:choose("disk")
+	t.session:tick(os.clock())
+	eq(t.notice("connection").title, "Connected", "replaced once answered")
+end)
+
+test("server errors after connecting become notices and stay connected", function()
+	local t = connectedSession()
+	t.receive("error", { message = "couldn't write file" })
+	t.session:tick(os.clock())
+	eq(t.lastStatus().status, "connected", "status")
+	local notice = t.notice("server-error")
+	eq(notice.kind, "error", "kind")
+	check(string.find(notice.detail, "couldn't write file", 1, true), "detail")
+end)
+
+test("missing folders and Studio-only instances are reported", function()
+	local t = sessionSetup()
+	t.open()
+	t.world.new("ModuleScript", "Extra", t.world.service("ReplicatedStorage"))
+	local base = snapshot({})
+	table.insert(base.mounts, { id = "x", path = { "ReplicatedStorage", "Nope" }, sync = true })
+	t.receive("snapshot", base)
+	t.session:tick(os.clock())
+	check(string.find(t.notice("mounts").detail, "ReplicatedStorage/Nope", 1, true), "missing folder")
+	eq(t.notice("studio-only").title, "1 instance only in Studio", "Studio only")
+	local info = t.session:info()
+	eq(#info.mounts, 1, "the missing folder isn't listed as syncing")
+	eq(info.mounts[1], "ReplicatedStorage", "mount")
+end)
+
+test("one change from disk names the instance; a burst merges into counts", function()
+	local t = connectedSession({ module("a", "Alpha", "1"), module("b", "Beta", "1") })
+	local now = os.clock()
+
+	t.receive("patch", { updated = { { id = "a", props = { Source = str("2") } } } })
+	t.session:tick(now)
+	local first = t.notice("fromDisk")
+	eq(first.title, "Alpha updated from disk", "title")
+	eq(first.routine, true, "routine")
+	eq(first.merge, false, "the first of a burst starts a new entry")
+
+	t.receive("patch", {
+		updated = { { id = "b", props = { Source = str("2") } } },
+		added = { module("c", "Gamma", "") },
+	})
+	t.session:tick(now + 1)
+	local merged = t.notice("fromDisk")
+	eq(merged.title, "Updated from disk", "title")
+	eq(merged.detail, "2 changed, 1 added", "detail")
+	eq(merged.merge, true, "merges")
+
+	t.receive("patch", { removed = { "c" } })
+	t.session:tick(now + 60)
+	local later = t.notice("fromDisk")
+	eq(later.title, "Gamma updated from disk", "a quiet spell starts over")
+	eq(later.detail, "1 removed", "detail")
+	eq(later.merge, false, "merge")
+end)
+
+test("a patch that fails to apply is reported", function()
+	local t = connectedSession()
+	t.receive("patch", { added = "not a list" })
+	t.session:tick(os.clock())
+	eq(t.notice("apply-failed").kind, "error", "kind")
+	eq(t.lastStatus().status, "connected", "status")
+end)
+
+test("what Sync can't apply is reported as one running count", function()
+	local t = connectedSession({ { id = "p", parent = "rs", name = "P", class = "Part" } })
+	local now = os.clock()
+	t.receive("patch", {
+		added = {
+			{ id = "x", parent = "rs", name = "Bad", class = "NotAClass" },
+			{ id = "y", parent = "nowhere", name = "Orphan", class = "Folder" },
+		},
+	})
+	t.session:tick(now)
+	local notice = t.notice("problems")
+	eq(notice.kind, "warning", "kind")
+	eq(notice.title, "2 changes couldn't be applied", "title")
+	check(string.find(notice.detail, "See Output", 1, true), "detail")
+
+	t.receive("patch", { updated = { { id = "missing", name = "Nope" } } })
+	t.session:tick(now + 1)
+	eq(t.notice("problems").title, "3 changes couldn't be applied", "merged title")
+	eq(t.notice("problems").merge, true, "merge")
+	check(#t.world.warnings >= 3, "still logged to Output")
+end)
+
+test("changes sent to disk are recorded without a pop-up and counted", function()
+	local t = connectedSession({ module("a", "Alpha", "1") })
+	local util = t.world.service("ReplicatedStorage"):FindFirstChild("Alpha")
+	util.Source = "2"
+	t.world.pump()
+	t.session:tick(os.clock() + 10)
+	local notice = t.notice("toDisk")
+	eq(notice.title, "Alpha sent to disk", "title")
+	eq(notice.quiet, true, "quiet")
+	local info = t.session:info()
+	eq(info.toDisk, 1, "toDisk")
+	eq(info.fromDisk, 0, "fromDisk")
+	check(info.lastChangeAt ~= nil, "lastChangeAt")
+end)
+
+test("live info tracks the connection", function()
+	local t = sessionSetup()
+	eq(t.session:info(), nil, "before connecting")
+	t.open()
+	eq(t.session:info(), nil, "before the snapshot")
+	t.receive("snapshot", snapshot({}))
+	t.session:tick(os.clock())
+	local info = t.session:info()
+	eq(info.url, "ws://test", "url")
+	eq(info.mounts[1], "ReplicatedStorage", "mount")
+	t.session:disconnect()
+	eq(t.session:info(), nil, "after disconnecting")
+end)
+
+test("a session works without a notice callback", function()
+	local world = FakeStudio.new()
+	local session = world.modules.Session.new({
+		onStatus = function() end,
+		onChoice = function() end,
+	}, function()
+		return {
+			send = function()
+				return true
+			end,
+			close = function() end,
+		}
+	end)
+	session:connect("ws://test")
+	session:disconnect()
 end)
 
 print(`{passed} passed, {failed} failed`)

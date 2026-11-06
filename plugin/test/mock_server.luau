@@ -11,6 +11,10 @@
 		add <name>        add a ModuleScript to ReplicatedStorage
 		rename <name>     rename the Hello script
 		remove            remove the Hello script
+		error <text>      report a server error, as a failed disk write would
+		burst <count>     send that many changes in quick succession
+		bad               send a patch that fails to apply
+		quit              stop, so the plugin sees the connection drop
 ]]
 
 local net = require("@lune/net")
@@ -140,6 +144,17 @@ task.spawn(function()
 					},
 				},
 			})
+		elseif command == "error" then
+			send("error", { message = if argument ~= "" then argument else "couldn't write file" })
+		elseif command == "burst" then
+			for index = 1, tonumber(argument) or 5 do
+				send("patch", { updated = { { id = "hello", props = { Source = str(`-- {index}\n`) } } } })
+				task.wait(0.3)
+			end
+		elseif command == "bad" then
+			send("patch", { added = "not a list" })
+		elseif command == "quit" then
+			process.exit(0)
 		elseif command then
 			print(`unknown command: {command}`)
 		end

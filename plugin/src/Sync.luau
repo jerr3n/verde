@@ -73,9 +73,10 @@ local ALWAYS_IGNORED_CLASSES = { Camera = true, Terrain = true }
 local Sync = {}
 Sync.__index = Sync
 
-function Sync.new(sendPatch: (Patch) -> ())
+function Sync.new(sendPatch: (Patch) -> (), onProblem: ((message: string) -> ())?)
 	return setmetatable({
 		sendPatch = sendPatch,
+		onProblem = onProblem,
 		refs = {} :: { [string]: Instance },
 		ids = {} :: { [Instance]: string },
 		shadows = {} :: { [Instance]: Shadow },
@@ -123,6 +124,14 @@ local function newRef(): string
 	return string.lower(HttpService:GenerateGUID(false))
 end
 
+-- Something couldn't be applied. Logged, and reported so the panel can show it.
+function Sync:_problem(message: string)
+	warn(`[Verde] {message}`)
+	if self.onProblem then
+		self.onProblem(message)
+	end
+end
+
 function Sync:_refOf(instance: Instance): string?
 	return self.ids[instance]
 end
@@ -168,7 +177,7 @@ function Sync:_write(instance: Instance, name: string, wire: Wire)
 		return self:_resolve(id)
 	end)
 	if not ok then
-		warn(`[Verde] couldn't set {pathOf(instance)}.{name}: {err}`)
+		self:_problem(`couldn't set {pathOf(instance)}.{name}: {err}`)
 	end
 end
 
@@ -231,9 +240,9 @@ function Sync:_create(wires: { WireInstance })
 	for _, wire in wires do
 		local parent = self.refs[wire.parent :: string]
 		if self.refs[wire.id] then
-			warn(`[Verde] ignoring duplicate added instance {wire.name}`)
+			self:_problem(`ignoring duplicate added instance {wire.name}`)
 		elseif parent == nil then
-			warn(`[Verde] skipping {wire.name}: its parent isn't synced`)
+			self:_problem(`skipping {wire.name}: its parent isn't synced`)
 		else
 			-- An untracked match can exist if disk mode left it alone earlier.
 			local existing: Instance?
@@ -250,7 +259,7 @@ function Sync:_create(wires: { WireInstance })
 				if ok then
 					instance = created
 				else
-					warn(`[Verde] skipping {wire.name}: can't create a {wire.class}`)
+					self:_problem(`skipping {wire.name}: can't create a {wire.class}`)
 				end
 			end
 
@@ -536,7 +545,7 @@ function Sync:applyPatch(patch: Patch)
 			local instance = self.refs[update.id]
 			local shadow = self.shadows[instance :: any]
 			if instance == nil or shadow == nil then
-				warn(`[Verde] ignoring an update for unknown instance {update.id}`)
+				self:_problem(`ignoring an update for unknown instance {update.id}`)
 			else
 				if update.name then
 					instance.Name = update.name
@@ -546,7 +555,7 @@ function Sync:applyPatch(patch: Patch)
 					if target then
 						instance.Parent = target
 					else
-						warn(`[Verde] can't move {instance.Name}: the new parent isn't synced`)
+						self:_problem(`can't move {instance.Name}: the new parent isn't synced`)
 					end
 				end
 				for name, wire in update.props or {} do

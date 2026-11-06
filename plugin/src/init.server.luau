@@ -29,11 +29,14 @@ local ui = Ui.new(plugin, {
 })
 
 session = Session.new({
-	onStatus = function(status, detail)
-		ui:setStatus(status, detail)
+	onStatus = function(status, detail, title)
+		ui:setStatus(status, detail, title)
 	end,
 	onChoice = function(summary)
 		ui:askChoice(summary)
+	end,
+	onNotice = function(notice)
+		ui:notify(notice)
 	end,
 })
 
@@ -45,7 +48,16 @@ plugin.Unloading:Connect(function()
 	ui:destroy()
 end)
 
+local uiFailed = false
+
 while running do
-	session:tick(os.clock())
+	local now = os.clock()
+	session:tick(now)
+	-- A display problem must not stop this loop, which is what keeps syncing alive.
+	local ok, err = pcall(ui.tick, ui, now, session:info())
+	if not ok and not uiFailed then
+		uiFailed = true
+		warn(`[Verde] the panel stopped updating: {err}`)
+	end
 	task.wait(TICK_SECONDS)
 end

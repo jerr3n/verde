@@ -1,0 +1,123 @@
+{
+  "name": "verde",
+  "displayName": "Verde",
+  "description": "Run the Verde sync server and browse your Roblox instances from the editor.",
+  "version": "0.1.0",
+  "publisher": "jerr3n",
+  "license": "SEE LICENSE IN LICENSE",
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jerr3n/verde.git",
+    "directory": "vscode"
+  },
+  "engines": {
+    "vscode": "^1.101.0"
+  },
+  "categories": ["Other"],
+  "keywords": ["roblox", "luau", "sync"],
+  "main": "./out/extension.js",
+  "extensionKind": ["workspace"],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Verde runs a server that reads and writes files in this workspace."
+    },
+    "virtualWorkspaces": false
+  },
+  "activationEvents": ["workspaceContains:**/project.yml"],
+  "contributes": {
+    "commands": [
+      { "command": "verde.start", "title": "Start Server", "category": "Verde", "icon": "$(debug-start)" },
+      { "command": "verde.stop", "title": "Stop Server", "category": "Verde", "icon": "$(debug-stop)" },
+      { "command": "verde.restart", "title": "Restart Server", "category": "Verde", "icon": "$(debug-restart)" },
+      { "command": "verde.init", "title": "Create Project", "category": "Verde" },
+      { "command": "verde.showLogs", "title": "Show Logs", "category": "Verde", "icon": "$(output)" },
+      { "command": "verde.copyUrl", "title": "Copy Server Address", "category": "Verde" },
+      { "command": "verde.openConfig", "title": "Open project.yml", "category": "Verde" },
+      { "command": "verde.menu", "title": "Show Menu", "category": "Verde" },
+      { "command": "verde.openInstance", "title": "Open File", "category": "Verde", "icon": "$(go-to-file)" },
+      { "command": "verde.renameInstance", "title": "Rename", "category": "Verde" },
+      { "command": "verde.deleteInstance", "title": "Delete", "category": "Verde" }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "verde", "title": "Verde", "icon": "media/leaf.svg" }
+      ]
+    },
+    "views": {
+      "verde": [
+        { "id": "verde.explorer", "name": "Explorer" },
+        { "id": "verde.properties", "name": "Properties", "type": "webview" }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "verde.explorer",
+        "contents": "There's no Verde project in this workspace.\n[Create Project](command:verde.init)",
+        "when": "!verde.hasProject"
+      },
+      {
+        "view": "verde.explorer",
+        "contents": "Start the server to see your instances.\n[Start Server](command:verde.start)",
+        "when": "verde.hasProject && verde.serverState != running && verde.serverState != starting"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "verde.start", "when": "view == verde.explorer && verde.hasProject && verde.serverState != running && verde.serverState != starting", "group": "navigation@1" },
+        { "command": "verde.restart", "when": "view == verde.explorer && verde.serverState == running", "group": "navigation@1" },
+        { "command": "verde.stop", "when": "view == verde.explorer && verde.serverState == running", "group": "navigation@2" },
+        { "command": "verde.showLogs", "when": "view == verde.explorer", "group": "navigation@3" }
+      ],
+      "view/item/context": [
+        { "command": "verde.openInstance", "when": "view == verde.explorer && viewItem =~ /^(instance|syncMount)$/", "group": "1_open" },
+        { "command": "verde.renameInstance", "when": "view == verde.explorer && viewItem == instance", "group": "2_edit@1" },
+        { "command": "verde.deleteInstance", "when": "view == verde.explorer && viewItem == instance", "group": "2_edit@2" }
+      ],
+      "commandPalette": [
+        { "command": "verde.start", "when": "verde.hasProject" },
+        { "command": "verde.stop", "when": "verde.serverState == running || verde.serverState == starting" },
+        { "command": "verde.restart", "when": "verde.serverState == running" },
+        { "command": "verde.copyUrl", "when": "verde.serverState == running" },
+        { "command": "verde.openConfig", "when": "verde.hasProject" },
+        { "command": "verde.menu", "when": "verde.hasProject" },
+        { "command": "verde.openInstance", "when": "false" },
+        { "command": "verde.renameInstance", "when": "false" },
+        { "command": "verde.deleteInstance", "when": "false" }
+      ]
+    },
+    "keybindings": [
+      { "command": "verde.renameInstance", "key": "f2", "when": "focusedView == verde.explorer" },
+      { "command": "verde.deleteInstance", "key": "delete", "mac": "cmd+backspace", "when": "focusedView == verde.explorer" }
+    ],
+    "configuration": {
+      "title": "Verde",
+      "properties": {
+        "verde.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "markdownDescription": "Path to the `verde` executable. Leave empty to search `PATH`, then `$GOPATH/bin`, which is where `make install` puts it."
+        },
+        "verde.autoStart": {
+          "type": "boolean",
+          "default": false,
+          "description": "Start the server when a workspace with a Verde project opens."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "watch": "tsc -p . --watch",
+    "test": "npm run build && go -C ../executable build -o \"$PWD/out/test/verde\" . && node --test \"out/test/*.test.js\"",
+    "package": "npm run build && node -e \"require('fs').copyFileSync('../LICENSE','LICENSE')\" && vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "~1.101.0",
+    "@vscode/vsce": "^3.0.0",
+    "typescript": "^5.8.0"
+  }
+}

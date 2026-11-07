@@ -23,6 +23,8 @@ type client struct {
 	conn  *websocket.Conn
 	queue chan protocol.Envelope // messages waiting for the writer goroutine
 	seq   int64                  // last seq sent. Only the writer goroutine touches this
+
+	editor bool // said hello as protocol.RoleEditor. Only Run touches this
 }
 
 type eventKind int
@@ -123,7 +125,11 @@ func (s *session) Run(ctx context.Context) error {
 			case eventMessage:
 				s.handleMessage(ev.client, ev.data)
 			case eventDisconnect:
+				_, registered := s.clients[ev.client]
 				delete(s.clients, ev.client)
+				if registered && !ev.client.editor {
+					s.sendStatus()
+				}
 			case EventDiskChanged:
 				s.handleDiskChange()
 			}
@@ -153,6 +159,12 @@ func (s *session) handleMessage(c *client, data []byte) {
 			return
 		}
 		s.handlePatch(c, env)
+	case "locate":
+		if !registered {
+			c.sendError(env.Seq, "locate sent before hello")
+			return
+		}
+		s.handleLocate(c, env)
 	case "ack", "error":
 		// Nothing to do for now.
 	default:
@@ -172,8 +184,9 @@ func (s *session) handleHello(c *client, e protocol.Envelope) {
 		return
 	}
 
+	c.editor = hello.Role == protocol.RoleEditor
 	places := s.cfg.Serve.PlaceIds
-	if len(places) > 0 && !slices.Contains(places, hello.PlaceID) {
+	if !c.editor && len(places) > 0 && !slices.Contains(places, hello.PlaceID) {
 		c.sendError(e.Seq, fmt.Sprintf("place %d is not in the allowed place files for this project", hello.PlaceID))
 		return
 	}
@@ -193,6 +206,52 @@ func (s *session) handleHello(c *client, e protocol.Envelope) {
 		return
 	}
 	s.clients[c] = struct{}{}
+
+	if !c.editor {
+		s.sendStatus()
+	} else if err := c.send("status", s.status()); err != nil {
+		s.logger.Warn("send status", zap.Error(err))
+	}
+}
+
+func (s *session) status() protocol.Status {
+	var status protocol.Status
+	for c := range s.clients {
+		if !c.editor {
+			status.Plugins++
+		}
+	}
+	return status
+}
+
+// sendStatus tells every editor what's connected. Plugins don't know this message.
+func (s *session) sendStatus() {
+	status := s.status()
+	for c := range s.clients {
+		if !c.editor {
+			continue
+		}
+		if err := c.send("status", status); err != nil {
+			s.logger.Warn("send status", zap.Error(err))
+		}
+	}
+}
+
+func (s *session) handleLocate(c *client, e protocol.Envelope) {
+	var locate protocol.Locate
+	if err := json.Unmarshal(e.Data, &locate); err != nil {
+		c.sendError(e.Seq, "locate is not valid")
+		return
+	}
+	located, err := project.Locate(s.cfg, s.t, s.mounts, locate.ID)
+	if err != nil {
+		c.sendError(e.Seq, err.Error())
+		return
+	}
+	located.Seq = e.Seq
+	if err := c.send("located", located); err != nil {
+		s.logger.Warn("send located", zap.Error(err))
+	}
 }
 
 // handlePatch applies a patch from a plugin to the tree and disk, then forwards what

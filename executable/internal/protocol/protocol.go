@@ -18,6 +18,31 @@ type Hello struct {
 	ProtocolVersion int    `json:"protocolVersion"`
 	Client          string `json:"client,omitempty"`
 	PlaceID         int64  `json:"placeId"`
+	Role            string `json:"role,omitempty"` // RoleEditor, or empty for a Studio plugin
+}
+
+// RoleEditor marks a client that isn't in a place, like the VS Code extension. placeIds
+// don't apply to it, and it isn't counted as a connected Studio.
+const RoleEditor = "editor"
+
+// Status what's connected, sent to editors when they connect and when it changes
+type Status struct {
+	Plugins int `json:"plugins"`
+}
+
+// Locate asks where an instance is on disk
+type Locate struct {
+	ID Ref `json:"id"`
+}
+
+// Located answers a Locate. Paths are /-separated from the project root
+type Located struct {
+	Seq   int64  `json:"seq"`
+	Found bool   `json:"found"`
+	Path  string `json:"path,omitempty"`  // its file, or its folder if Dir
+	File  string `json:"file,omitempty"`  // file holding Source, if it's a script
+	Props string `json:"props,omitempty"` // its .inst.json, if it has one
+	Dir   bool   `json:"dir,omitempty"`
 }
 
 // Snapshot server's reply, full project state

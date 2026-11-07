@@ -41,24 +41,7 @@ func Apply(cfg *config.Cfg, t *tree.Tree, mounts []protocol.Mount, p protocol.Pa
 	}
 	defer root.Close()
 
-	w := &writer{
-		tree:     t,
-		root:     root,
-		scan:     &loader{cfg: cfg, files: root.FS()},
-		mounts:   make(map[protocol.Ref]bool, len(mounts)),
-		syncDirs: make(map[protocol.Ref]string, len(cfg.Sync)),
-	}
-	for _, mount := range mounts {
-		w.mounts[mount.ID] = true
-		if !mount.Sync {
-			continue
-		}
-		for _, entry := range cfg.Sync {
-			if entry.Instance == strings.Join(mount.Path, "/") {
-				w.syncDirs[mount.ID] = filepath.ToSlash(entry.Path)
-			}
-		}
-	}
+	w := newWriter(cfg, t, mounts, root)
 
 	for _, inst := range p.Added {
 		w.add(inst)
@@ -80,6 +63,49 @@ func Apply(cfg *config.Cfg, t *tree.Tree, mounts []protocol.Mount, p protocol.Pa
 		}
 	}
 	return w.applied, w.errs
+}
+
+// Locate finds an instance's files. Found is false if it has none, like a mount that's
+// only on the way to a sync target, or a fileless instance.
+func Locate(cfg *config.Cfg, t *tree.Tree, mounts []protocol.Mount, id protocol.Ref) (protocol.Located, error) {
+	root, err := os.OpenRoot(cfg.Root)
+	if err != nil {
+		return protocol.Located{}, err
+	}
+	defer root.Close()
+
+	w := newWriter(cfg, t, mounts, root)
+	loc, ok := w.locate(id)
+	if !ok {
+		return protocol.Located{}, nil
+	}
+	located := protocol.Located{Found: true, Path: loc.path, File: loc.file, Dir: loc.dir}
+	if loc.props != "" && w.exists(loc.props) {
+		located.Props = loc.props
+	}
+	return located, nil
+}
+
+func newWriter(cfg *config.Cfg, t *tree.Tree, mounts []protocol.Mount, root *os.Root) *writer {
+	w := &writer{
+		tree:     t,
+		root:     root,
+		scan:     &loader{cfg: cfg, files: root.FS()},
+		mounts:   make(map[protocol.Ref]bool, len(mounts)),
+		syncDirs: make(map[protocol.Ref]string, len(cfg.Sync)),
+	}
+	for _, mount := range mounts {
+		w.mounts[mount.ID] = true
+		if !mount.Sync {
+			continue
+		}
+		for _, entry := range cfg.Sync {
+			if entry.Instance == strings.Join(mount.Path, "/") {
+				w.syncDirs[mount.ID] = filepath.ToSlash(entry.Path)
+			}
+		}
+	}
+	return w
 }
 
 type writer struct {

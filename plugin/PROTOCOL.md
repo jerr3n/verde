@@ -270,6 +270,9 @@ message an `ack` or `error` refers to.
 | `patch` | both | Patch |
 | `ack` | both | `{ "seq": 12 }`: that message was applied |
 | `error` | both | `{ "seq": 12, "message": "..." }` |
+| `status` | server, to editors | Status |
+| `locate` | editors | `{ "id": "..." }` |
+| `located` | server | Located |
 
 The plugin sends `ack` for every patch it applies and ignores `ack`s it receives, so the
 backend can ignore them too and doesn't need to send any.
@@ -300,6 +303,8 @@ applied afterwards, so the backend doesn't need to hold them back.
 ```
 
 `placeId` is 0 for an unpublished place. To refuse a connection, reply with `error`.
+
+The Studio plugin leaves out `role`. See [Editor clients](#editor-clients) for the other value.
 
 ### Snapshot
 
@@ -414,6 +419,35 @@ outside the synced instances.
 
 The backend can store `v` without decoding it, so keep it as `json.RawMessage`.
 
+### Editor clients
+
+A client that isn't in a place, like the VS Code extension, says hello with
+`"role": "editor"`. It gets the same `snapshot` and `patch` messages as a plugin, and its
+patches are handled the same way: they're written to disk and forwarded to everyone else, but
+not echoed back. It differs in three ways:
+
+- `placeIds` don't apply to it.
+- It isn't counted as a connected Studio. It's sent `status` right after its snapshot, and
+  whenever a plugin connects or leaves. Plugins are never sent `status`.
+
+  ```json
+  { "plugins": 1 }
+  ```
+
+- It doesn't compare the snapshot with anything, so connecting changes nothing and it can
+  reconnect on its own.
+
+Any client can ask where an instance's files are with `locate`, since only the server knows.
+Paths in the answer are `/`-separated from the project root. `file` is there for scripts,
+`props` if a `.inst.json` exists, and `found` is false for an instance with no files, like a
+fileless one or a mount on the way to a sync target.
+
+```json
+{ "seq": 7, "found": true, "path": "src/server/Main.server.luau", "file": "src/server/Main.server.luau" }
+```
+
+`seq` is the `locate` message's. An `error` with that `seq` means it failed.
+
 ### How the snapshot is applied
 
 The plugin walks each `sync: true` mount and matches snapshot children to Studio children
@@ -455,6 +489,24 @@ type Hello struct {
 	ProtocolVersion int    `json:"protocolVersion"`
 	Client          string `json:"client,omitempty"`
 	PlaceID         int64  `json:"placeId"`
+	Role            string `json:"role,omitempty"` // "editor", or empty for a Studio plugin
+}
+
+type Status struct {
+	Plugins int `json:"plugins"`
+}
+
+type Locate struct {
+	ID Ref `json:"id"`
+}
+
+type Located struct {
+	Seq   int64  `json:"seq"`
+	Found bool   `json:"found"`
+	Path  string `json:"path,omitempty"`
+	File  string `json:"file,omitempty"`
+	Props string `json:"props,omitempty"`
+	Dir   bool   `json:"dir,omitempty"`
 }
 
 type Snapshot struct {

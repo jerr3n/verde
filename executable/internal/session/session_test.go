@@ -85,6 +85,17 @@ type plugin struct {
 
 func (s *server) connect() *plugin {
 	s.t.Helper()
+	return s.say(protocol.Hello{ProtocolVersion: protocolVersion, Client: "test"})
+}
+
+func (s *server) connectEditor() *plugin {
+	s.t.Helper()
+	return s.say(protocol.Hello{ProtocolVersion: protocolVersion, Role: protocol.RoleEditor})
+}
+
+// say connects and sends hello, which has to be answered with a snapshot.
+func (s *server) say(hello protocol.Hello) *plugin {
+	s.t.Helper()
 	conn, _, err := websocket.Dial(context.Background(), s.url, nil)
 	if err != nil {
 		s.t.Fatal(err)
@@ -106,7 +117,7 @@ func (s *server) connect() *plugin {
 		}
 	}()
 
-	p.send("hello", protocol.Hello{ProtocolVersion: protocolVersion, Client: "test"})
+	p.send("hello", hello)
 	env := p.next()
 	if env.Type != "snapshot" {
 		s.t.Fatalf("got %s, want snapshot: %s", env.Type, env.Data)
@@ -416,5 +427,141 @@ func TestPatchBeforeHelloIsRejected(t *testing.T) {
 	}
 	if env.Type != "error" {
 		t.Errorf("got %s, want error", env.Type)
+	}
+}
+
+func (p *plugin) nextStatus() protocol.Status {
+	p.t.Helper()
+	env := p.next()
+	if env.Type != "status" {
+		p.t.Fatalf("got %s, want status: %s", env.Type, env.Data)
+	}
+	var status protocol.Status
+	if err := json.Unmarshal(env.Data, &status); err != nil {
+		p.t.Fatal(err)
+	}
+	return status
+}
+
+func TestEditorIsToldWhichPluginsAreConnected(t *testing.T) {
+	s := startServer(t, map[string]string{"src/Main.luau": "a"})
+
+	editor := s.connectEditor()
+	if got := editor.nextStatus(); got.Plugins != 0 {
+		t.Errorf("before a plugin connects: %d plugins", got.Plugins)
+	}
+
+	other := s.connectEditor()
+	other.nextStatus()
+	editor.assertQuiet() // an editor isn't a Studio
+
+	studio := s.connect()
+	if got := editor.nextStatus(); got.Plugins != 1 {
+		t.Errorf("after a plugin connects: %d plugins", got.Plugins)
+	}
+
+	studio.conn.CloseNow()
+	if got := editor.nextStatus(); got.Plugins != 0 {
+		t.Errorf("after a plugin leaves: %d plugins", got.Plugins)
+	}
+}
+
+func TestPluginsAreNotSentStatus(t *testing.T) {
+	s := startServer(t, map[string]string{"src/Main.luau": "a"})
+	studio := s.connect()
+	s.connectEditor()
+	s.connect().conn.CloseNow()
+	studio.assertQuiet()
+}
+
+func TestEditorIsNotLimitedByPlaceIds(t *testing.T) {
+	s := startServer(t, map[string]string{"src/Main.luau": "a"})
+	s.cfg.Serve.PlaceIds = []int64{42}
+
+	s.connectEditor() // fails the test if it's refused
+
+	conn, _, err := websocket.Dial(context.Background(), s.url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	refused := &plugin{t: t, conn: conn}
+	refused.send("hello", protocol.Hello{ProtocolVersion: protocolVersion, PlaceID: 7})
+	_, data, err := conn.Read(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var env protocol.Envelope
+	if err := json.Unmarshal(data, &env); err != nil {
+		t.Fatal(err)
+	}
+	if env.Type != "error" {
+		t.Errorf("a plugin in another place got %s, want error", env.Type)
+	}
+}
+
+func TestEditorPatchReachesDiskAndStudio(t *testing.T) {
+	s := startServer(t, map[string]string{"src/Lamp.Part.inst.json": "{}\n"})
+	studio := s.connect()
+	editor := s.connectEditor()
+	editor.nextStatus()
+
+	lamp := editor.ref("Lamp")
+	editor.send("patch", protocol.Patch{Updated: []protocol.Update{{
+		ID:    lamp,
+		Props: map[string]protocol.Value{"Anchored": {Type: "Bool", Value: json.RawMessage("true")}},
+	}}})
+
+	got := studio.nextPatch()
+	if len(got.Updated) != 1 || got.Updated[0].ID != lamp {
+		t.Errorf("Studio got %+v", got)
+	}
+	s.waitForFile("src/Lamp.Part.inst.json", "{\n  \"props\": {\n    \"Anchored\": {\"t\":\"Bool\",\"v\":true}\n  }\n}\n")
+	editor.assertQuiet() // the sender already has its own change
+}
+
+func TestLocate(t *testing.T) {
+	s := startServer(t, map[string]string{
+		"src/Main.server.luau":    "a",
+		"src/Lamp.Part.inst.json": "{}\n",
+		"src/lib/Util.luau":       "b",
+	})
+	editor := s.connectEditor()
+	editor.nextStatus()
+
+	locate := func(id protocol.Ref) protocol.Located {
+		t.Helper()
+		editor.send("locate", protocol.Locate{ID: id})
+		env := editor.next()
+		if env.Type != "located" {
+			t.Fatalf("got %s, want located: %s", env.Type, env.Data)
+		}
+		var located protocol.Located
+		if err := json.Unmarshal(env.Data, &located); err != nil {
+			t.Fatal(err)
+		}
+		if located.Seq != editor.seq {
+			t.Errorf("located.seq = %d, want %d", located.Seq, editor.seq)
+		}
+		return located
+	}
+
+	if got := locate(editor.ref("Main")); got.File != "src/Main.server.luau" || got.Props != "" {
+		t.Errorf("Main: %+v", got)
+	}
+	if got := locate(editor.ref("Lamp")); got.Path != "src/Lamp.Part.inst.json" || got.Props != got.Path {
+		t.Errorf("Lamp: %+v", got)
+	}
+	if got := locate(editor.ref("lib")); got.Path != "src/lib" || !got.Dir {
+		t.Errorf("lib: %+v", got)
+	}
+	if got := locate(editor.ref("W")); got.Path != "src" || !got.Dir {
+		t.Errorf("mount: %+v", got)
+	}
+	if got := locate(editor.ref("game")); got.Found {
+		t.Errorf("game has no folder: %+v", got)
+	}
+	if got := locate("not-a-ref"); got.Found {
+		t.Errorf("unknown ref: %+v", got)
 	}
 }

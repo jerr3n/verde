@@ -206,11 +206,11 @@ func TestApplyLeavesUnchangedFileAlone(t *testing.T) {
 
 func TestApplyRenames(t *testing.T) {
 	f := newFixture(t, map[string]string{
-		"s/Main.server.luau":       "main",
-		"s/Shop/index.server.luau": "shop",
-		"s/Shop/Item.luau":         "item",
-		"s/lib/Util.luau":          "util",
-		"s/lib/README.md":          "not an instance",
+		"s/Main.server.luau":      "main",
+		"s/Shop/init.server.luau": "shop",
+		"s/Shop/Item.luau":        "item",
+		"s/lib/Util.luau":         "util",
+		"s/lib/README.md":         "not an instance",
 	}, syncW)
 
 	f.apply(protocol.Patch{Updated: []protocol.Update{
@@ -222,7 +222,7 @@ func TestApplyRenames(t *testing.T) {
 	f.assertMissing("s/Main.server.luau")
 	f.assertFile("s/Entry.server.luau", "main")
 	f.assertMissing("s/Shop")
-	f.assertFile("s/Store/index.server.luau", "shop")
+	f.assertFile("s/Store/init.server.luau", "shop")
 	f.assertFile("s/Store/Item.luau", "item")
 	f.assertMissing("s/lib")
 	f.assertFile("s/shared/Util.luau", "util")
@@ -267,16 +267,16 @@ func TestApplyScriptBecomesFolderWhenItGetsAChild(t *testing.T) {
 	f.apply(protocol.Patch{Added: []protocol.Instance{script("a", f.ref("game/W/Shop"), "Item", "ModuleScript", "item")}})
 
 	f.assertMissing("s/Shop.server.luau")
-	f.assertFile("s/Shop/index.server.luau", "shop")
+	f.assertFile("s/Shop/init.server.luau", "shop")
 	f.assertFile("s/Shop/Item.luau", "item")
 
 	// Its Source now goes to the new place.
 	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: f.ref("game/W/Shop"), Props: srcProps("changed")}}})
-	f.assertFile("s/Shop/index.server.luau", "changed")
+	f.assertFile("s/Shop/init.server.luau", "changed")
 
 	// It stays a folder without children, which is still a valid project.
 	f.apply(protocol.Patch{Removed: []protocol.Ref{"a"}})
-	f.assertFile("s/Shop/index.server.luau", "changed")
+	f.assertFile("s/Shop/init.server.luau", "changed")
 }
 
 func TestApplyScriptWontMergeWithFolderOfTheSameName(t *testing.T) {
@@ -305,9 +305,9 @@ func TestApplyScriptWontMergeWithFolderOfTheSameName(t *testing.T) {
 	f.assertFile("s/Foo/Bar.luau", "bar")
 	f.assertMissing("s/Foo/Kid.luau")
 	f.assertMissing("s/Foo.luau")
-	f.assertFile(dir+"/index.luau", "script")
+	f.assertFile(dir+"/init.luau", "script")
 	f.assertFile(dir+"/Kid.luau", "kid")
-	f.assertFile(dir+"/index.ModuleScript.inst.json", "{\n  \"id\": \""+string(scriptRef)+"\",\n  \"name\": \"Foo\"\n}\n")
+	f.assertFile(dir+"/init.ModuleScript.inst.json", "{\n  \"id\": \""+string(scriptRef)+"\",\n  \"name\": \"Foo\"\n}\n")
 }
 
 func TestApplyRemovesToTrash(t *testing.T) {
@@ -352,7 +352,7 @@ func TestApplyRemoveUnknownIsNoOp(t *testing.T) {
 func TestApplyDangerousNamesStayInsideAndRoundTrip(t *testing.T) {
 	names := []string{
 		"../../escape", "..", ".", "/", "a/b", `a\b`, "a:b", "What?", "*", `q"q`, "<x>", "p|p",
-		"100%", "%2F", ".git", "index", "x.server", "x.client", "CON", "nul", "COM1.thing",
+		"100%", "%2F", ".git", "init", "x.server", "x.client", "CON", "nul", "COM1.thing",
 		"trailing.", "trailing ", "\x01ctl", "ümlaut", "日本語", "x.luau",
 	}
 	for _, class := range []string{"Script", "LocalScript", "ModuleScript", "Folder"} {
@@ -412,7 +412,7 @@ func TestApplyWritesNonScripts(t *testing.T) {
 		script("inner", "part", "Glow", "Script", "glow"),
 	}})
 
-	f.assertFile("s/Lamp/index.Part.inst.json", "{\n  \"props\": {\n    \"Anchored\": {\"t\":\"Bool\",\"v\":true}\n  }\n}\n")
+	f.assertFile("s/Lamp/init.Part.inst.json", "{\n  \"props\": {\n    \"Anchored\": {\"t\":\"Bool\",\"v\":true}\n  }\n}\n")
 	f.assertFile("s/Lamp/Glow.server.luau", "glow")
 
 	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: "inner", Props: srcProps("changed")}}})
@@ -443,7 +443,7 @@ func TestApplyMoveIntoAndOutOfNonScript(t *testing.T) {
 	}})
 	f.assertMissing("s/Main.luau")
 	f.assertMissing("s/Lamp.Part.inst.json")
-	f.assertFile("s/Lamp/index.Part.inst.json", "{}\n")
+	f.assertFile("s/Lamp/init.Part.inst.json", "{}\n")
 	f.assertFile("s/Lamp/Main.luau", "main")
 	f.assertFile("s/Lamp/lib/Sub.luau", "sub")
 
@@ -454,7 +454,7 @@ func TestApplyMoveIntoAndOutOfNonScript(t *testing.T) {
 	}})
 	f.assertFile("s/Main.luau", "main")
 	f.assertFile("s/lib/Sub.luau", "sub")
-	f.assertFile("s/Lamp/index.Part.inst.json", "{}\n")
+	f.assertFile("s/Lamp/init.Part.inst.json", "{}\n")
 }
 
 func TestApplySameNameSiblings(t *testing.T) {

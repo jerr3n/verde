@@ -6,11 +6,11 @@
 //	Input.client.luau        LocalScript
 //	Util.luau                ModuleScript
 //	lib/                     Folder
-//	Shop/index.server.luau   Shop, as a Script whose children are the rest of Shop/
+//	Shop/init.server.luau    Shop, as a Script whose children are the rest of Shop/
 //	Lamp.Part.inst.json      Lamp, as a Part with the properties in the file
-//	Car/index.Model.inst.json  Car, as a Model whose children are the rest of Car/
+//	Car/init.Model.inst.json  Car, as a Model whose children are the rest of Car/
 //	Main.Script.inst.json    Main.server.luau's properties other than Source
-//	lib/index.Folder.inst.json  lib's properties, if it has any
+//	lib/init.Folder.inst.json  lib's properties, if it has any
 //	Part~3f9a1c2e7b04.Part.inst.json  a second Part called Part, with its name inside
 //
 // Other files are skipped. Names that aren't safe as file names are percent-encoded
@@ -108,11 +108,11 @@ func scriptSuffix(class string) string {
 	return ""
 }
 
-// isIndex reports whether a file is the script of the folder it's in. It's
-// case-sensitive, so Index.luau is a normal ModuleScript.
-func isIndex(filename string) bool {
+// isInit reports whether a file is the script of the folder it's in. It's
+// case-sensitive, so Init.luau is a normal ModuleScript.
+func isInit(filename string) bool {
 	name, _, ok := classify(filename)
-	return ok && name == "index"
+	return ok && name == "init"
 }
 
 // sibling identifies an instance among its siblings, the way the plugin matches them.
@@ -196,12 +196,12 @@ func (l *loader) loadMount(dir, instancePath string, mount protocol.Ref) error {
 	}
 
 	// A service like Workspace can't become a script.
-	index, err := l.findIndex(dir)
+	init, err := l.findInit(dir)
 	if err != nil {
 		return err
 	}
-	if index != "" {
-		return fmt.Errorf("%s: a service can't have an index file", dir)
+	if init != "" {
+		return fmt.Errorf("%s: a service can't have an init file", dir)
 	}
 
 	// Everything inside the folder goes under the mount.
@@ -243,22 +243,22 @@ func (l *loader) loadChildren(dir, instancePath string, parent protocol.Ref) err
 	return nil
 }
 
-// turns a folder into an instance, then loads what's inside. its index file decides what it
+// turns a folder into an instance, then loads what's inside. its init file decides what it
 // becomes, otherwise it's a Folder
 func (l *loader) loadDir(full, name, instancePath string, parent protocol.Ref) error {
-	index, err := l.findIndex(full)
+	init, err := l.findInit(full)
 	if err != nil {
 		return err
 	}
-	class := indexClass(index)
+	class := initClass(init)
 
 	var source string
 	var file instFile
-	if isIndex(index) {
-		source = path.Join(full, index)
-		file, err = l.readOptionalInst(indexProps(full, class), class)
-	} else if index != "" {
-		file, err = l.readInst(path.Join(full, index), class)
+	if isInit(init) {
+		source = path.Join(full, init)
+		file, err = l.readOptionalInst(initProps(full, class), class)
+	} else if init != "" {
+		file, err = l.readInst(path.Join(full, init), class)
 	}
 	if err != nil {
 		return err
@@ -280,11 +280,11 @@ func (l *loader) loadDir(full, name, instancePath string, parent protocol.Ref) e
 	return l.loadChildren(full, childPath, ref)
 }
 
-// turns a script or .inst.json file into an instance. skips index files, loadDir used those.
+// turns a script or .inst.json file into an instance. skips init files, loadDir used those.
 // a script's .inst.json is read w/ its script, so a leftover one can't bring it back
 func (l *loader) loadFile(full, filename, instancePath string, parent protocol.Ref) error {
 	if name, class, ok := classifyInst(filename); ok {
-		if name == "index" || scriptSuffix(class) != "" {
+		if name == "init" || scriptSuffix(class) != "" {
 			return nil
 		}
 		file, err := l.readInst(full, class)
@@ -303,7 +303,7 @@ func (l *loader) loadFile(full, filename, instancePath string, parent protocol.R
 	}
 
 	name, class, ok := classify(filename)
-	if !ok || isIndex(filename) {
+	if !ok || isInit(filename) {
 		return nil
 	}
 	file, err := l.readOptionalInst(scriptProps(full, class), class)
@@ -332,7 +332,7 @@ func (l *loader) insert(parent protocol.Ref, name, class, origin, source string,
 		}
 		l.ids[id] = origin
 	} else {
-		// Foo.luau and Foo/index.luau would both be a ModuleScript called Foo. nothing tells
+		// Foo.luau and Foo/init.luau would both be a ModuleScript called Foo. nothing tells
 		// them apart, so verde wouldn't know which one a change from studio was for
 		key := sibling{parent, name, class}
 		if other, exists := l.seen[key]; exists {
@@ -371,9 +371,9 @@ func (l *loader) insert(parent protocol.Ref, name, class, origin, source string,
 	return inst.ID, nil
 }
 
-// returns a folder's index file, or "" if it doesn't have one. more than one is an error,
+// returns a folder's init file, or "" if it doesn't have one. more than one is an error,
 // since a folder can only become one instance
-func (l *loader) findIndex(dir string) (string, error) {
+func (l *loader) findInit(dir string) (string, error) {
 	entries, err := fs.ReadDir(l.files, dir)
 	if err != nil {
 		return "", err
@@ -381,7 +381,7 @@ func (l *loader) findIndex(dir string) (string, error) {
 
 	found := ""
 	for _, entry := range entries {
-		if !entry.Type().IsRegular() || !(isIndex(entry.Name()) || isInstIndex(entry.Name())) {
+		if !entry.Type().IsRegular() || !(isInit(entry.Name()) || isInstInit(entry.Name())) {
 			continue
 		}
 		ignored, err := l.pathIgnored(path.Join(dir, entry.Name()))

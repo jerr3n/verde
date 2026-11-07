@@ -146,7 +146,7 @@ Studio and gives it a new Ref. That's fine at first. Detecting real renames can 
 | Decision | Suggestion |
 |---|---|
 | How classes map to files | Use `.server.luau` for `Script`, `.client.luau` for `LocalScript`, `.luau` for `ModuleScript`, and directories for `Folder` |
-| A script with children | Use a directory containing `index.server.luau`, `index.client.luau` or `index.luau` |
+| A script with children | Use a directory containing `init.server.luau`, `init.client.luau` or `init.luau` |
 | Non-script instances | Stored as `.inst.json` files (see "Instances on disk") |
 | `Ref` properties | Kept in memory for now, because a `Ref` changes on every load and a saved one wouldn't point at anything. They're lost on a server restart. Later, store a permanent id in the target's file |
 | Siblings with the same name | The first gets the plain file name, and the others add a tag made from their Ref, with their real name and an id inside (see "Instances on disk"). Studio allows many children named `Part`, but they can't share a path |
@@ -168,7 +168,7 @@ file name and scans decode it. These all come back as the same name:
 | A leading `.` | Would hide the file, and could make `.git` |
 | A trailing `.` or space | Windows drops them |
 | A trailing `.server` or `.client` | A ModuleScript called `x.server` would read back as a Script called `x` |
-| `index` | `index.luau` means "the script of this folder" |
+| `init` | `init.luau` means "the script of this folder" |
 | `CON`, `NUL`, `COM1` and the like | Reserved on Windows |
 
 An instance that should have a file but can't is marked *fileless*: it stays in the tree
@@ -181,19 +181,19 @@ instance.
 ## Instances on disk
 
 Anything that isn't a script or a plain `Folder` is stored in a `.inst.json` file, with its
-name and class in the file name. An instance with children is a folder with an index file,
-the same way `Shop/index.luau` works:
+name and class in the file name. An instance with children is a folder with an init file,
+the same way `Shop/init.luau` works:
 
 ```
 src/workspace/
   Lamp.Part.inst.json         a Part with no children
   Car/
-    index.Model.inst.json     makes Car a Model
+    init.Model.inst.json      makes Car a Model
     Wheel.Part.inst.json
     Drive.server.luau
     Drive.Script.inst.json    Drive's properties other than Source
   lib/
-    index.Folder.inst.json    lib's tags, attributes and other properties
+    init.Folder.inst.json     lib's tags, attributes and other properties
     Util.luau
     Util.ModuleScript.inst.json
 ```
@@ -215,7 +215,7 @@ that a change is a one-line diff:
   `Source` is always in its `.luau` file.
 - The class is in the file name so that `Lamp` the Part and `Lamp` the Model can sit side by
   side, as they can in Studio, and so that finding one doesn't mean opening every file.
-- `index.Script.inst.json` doesn't make a folder a script, because only `index.server.luau`
+- `init.Script.inst.json` doesn't make a folder a script, because only `init.server.luau`
   can do that. A script's `.inst.json` left behind by a deleted script is ignored.
 - Other `.json` files, like `package.lock.json`, are skipped.
 - A file that can't be parsed stops the scan, and the server keeps its current tree. A

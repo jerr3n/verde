@@ -7,7 +7,7 @@ import (
 )
 
 func TestEncodeNameLeavesNormalNamesAlone(t *testing.T) {
-	for _, name := range []string{"Util", "Main Menu", "a.b", "日本語", "Index", "x-y_z", "CONSOLE", "server"} {
+	for _, name := range []string{"Util", "Main Menu", "a.b", "日本語", "Init", "x-y_z", "CONSOLE", "server"} {
 		if got := encodeName(name); got != name {
 			t.Errorf("encodeName(%q) = %q", name, got)
 		}
@@ -22,7 +22,7 @@ func TestEncodeNameExamples(t *testing.T) {
 		".git":     "%2Egit",
 		"a/b":      "a%2Fb",
 		"100%":     "100%25",
-		"index":    "%69ndex",
+		"init":     "%69nit",
 		"x.server": "x%2Eserver",
 		"CON":      "%43ON",
 		"nul.txt":  "%6Eul.txt",
@@ -45,7 +45,7 @@ func TestDecodeNameKeepsWhatEncodingCouldntWrite(t *testing.T) {
 }
 
 // The property every scan depends on: an encoded name is one path segment, comes back
-// unchanged, and isn't mistaken for a different class or an index file.
+// unchanged, and isn't mistaken for a different class or an init file.
 func TestEncodeNameRoundTrips(t *testing.T) {
 	check := func(name string) bool {
 		if name == "" {
@@ -60,7 +60,7 @@ func TestEncodeNameRoundTrips(t *testing.T) {
 		for _, kind := range scriptKinds {
 			file := encoded + kind.suffix
 			got, class, ok := classify(file)
-			if !ok || class != kind.class || decodeName(got) != name || isIndex(file) {
+			if !ok || class != kind.class || decodeName(got) != name || isInit(file) {
 				t.Logf("%q as %s read back as %q, %s, %v", name, file, got, class, ok)
 				return false
 			}
@@ -71,8 +71,8 @@ func TestEncodeNameRoundTrips(t *testing.T) {
 		t.Error(err)
 	}
 	for _, name := range []string{
-		"..", ".", "index", "x.server", "x.client", "x.server.luau", ".server", ".client",
-		"%", "%%", "%25", "%2E", "a. ", " .", ".. ", "CON.server", "index.server",
+		"..", ".", "init", "x.server", "x.client", "x.server.luau", ".server", ".client",
+		"%", "%%", "%25", "%2E", "a. ", " .", ".. ", "CON.server", "init.server",
 	} {
 		if !check(name) {
 			t.Errorf("%q doesn't round-trip", name)

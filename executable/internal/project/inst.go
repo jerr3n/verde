@@ -54,7 +54,7 @@ func validClass(class string) bool {
 }
 
 // splits Lamp.Part.inst.json into name and class. class is after the last dot, since names
-// can hold dots. name stays as it is on disk, so index isn't mixed up w/ an encoded %69ndex
+// can hold dots. name stays as it is on disk, so init isn't mixed up w/ an encoded %69nit
 func classifyInst(filename string) (name, class string, ok bool) {
 	stem, found := strings.CutSuffix(filename, instSuffix)
 	if !found {
@@ -67,19 +67,19 @@ func classifyInst(filename string) (name, class string, ok bool) {
 	return stem[:dot], stem[dot+1:], true
 }
 
-// reports whether a file gives its folder a class, like index.luau does. a script's
+// reports whether a file gives its folder a class, like init.luau does. a script's
 // .inst.json doesn't, it only adds to the script next to it
-func isInstIndex(filename string) bool {
+func isInstInit(filename string) bool {
 	name, class, ok := classifyInst(filename)
-	return ok && name == "index" && scriptSuffix(class) == ""
+	return ok && name == "init" && scriptSuffix(class) == ""
 }
 
-// class of a folder, from its index file
-func indexClass(index string) string {
-	if _, class, ok := classify(index); ok {
+// class of a folder, from its init file
+func initClass(init string) string {
+	if _, class, ok := classify(init); ok {
 		return class
 	}
-	if _, class, ok := classifyInst(index); ok {
+	if _, class, ok := classifyInst(init); ok {
 		return class
 	}
 	return "Folder"
@@ -94,8 +94,8 @@ func leafSuffix(class string) string {
 }
 
 // .inst.json file of an instance stored as a folder
-func indexProps(dir, class string) string {
-	return path.Join(dir, "index."+class+instSuffix)
+func initProps(dir, class string) string {
+	return path.Join(dir, "init."+class+instSuffix)
 }
 
 // .inst.json file next to a script stored as one file

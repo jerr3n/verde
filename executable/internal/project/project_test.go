@@ -73,7 +73,7 @@ func TestClassify(t *testing.T) {
 		{"Main.server.luau", "Main", "Script", true},
 		{"Input.client.luau", "Input", "LocalScript", true},
 		{"Util.luau", "Util", "ModuleScript", true},
-		{"index.server.luau", "index", "Script", true},
+		{"init.server.luau", "init", "Script", true},
 		{"a.b.luau", "a.b", "ModuleScript", true},
 		{"README.md", "", "", false},
 		{"Main.LUAU", "", "", false},
@@ -91,17 +91,17 @@ func TestClassify(t *testing.T) {
 	}
 }
 
-func TestIsIndex(t *testing.T) {
+func TestIsInit(t *testing.T) {
 	for file, want := range map[string]bool{
-		"index.luau":        true,
-		"index.server.luau": true,
-		"index.client.luau": true,
-		"Index.luau":        false,
-		"index.md":          false,
-		"myindex.luau":      false,
+		"init.luau":        true,
+		"init.server.luau": true,
+		"init.client.luau": true,
+		"Init.luau":        false,
+		"init.md":          false,
+		"myindex.luau":     false,
 	} {
-		if got := isIndex(file); got != want {
-			t.Errorf("isIndex(%q) = %v, want %v", file, got, want)
+		if got := isInit(file); got != want {
+			t.Errorf("isInit(%q) = %v, want %v", file, got, want)
 		}
 	}
 }
@@ -120,17 +120,17 @@ func TestNewRef(t *testing.T) {
 
 func TestLoadFileFormat(t *testing.T) {
 	cfg := newConfig(t, map[string]string{
-		"s/Main.server.luau":       "print('main')\n",
-		"s/Input.client.luau":      "input",
-		"s/Util.luau":              "util",
-		"s/Index.luau":             "capital",
-		"s/README.md":              "skipped",
-		"s/lib/Deep.luau":          "deep",
-		"s/empty/.gitkeep":         "",
-		"s/Shop/index.server.luau": "shop",
-		"s/Shop/Prices.luau":       "prices",
-		"s/Mod/index.luau":         "mod",
-		"s/Gui/index.client.luau":  "gui",
+		"s/Main.server.luau":      "print('main')\n",
+		"s/Input.client.luau":     "input",
+		"s/Util.luau":             "util",
+		"s/Init.luau":             "capital",
+		"s/README.md":             "skipped",
+		"s/lib/Deep.luau":         "deep",
+		"s/empty/.gitkeep":        "",
+		"s/Shop/init.server.luau": "shop",
+		"s/Shop/Prices.luau":      "prices",
+		"s/Mod/init.luau":         "mod",
+		"s/Gui/init.client.luau":  "gui",
 	}, syncW)
 
 	tr, _, err := Load(cfg)
@@ -145,7 +145,7 @@ func TestLoadFileFormat(t *testing.T) {
 		"game/W/Main":        "Script",
 		"game/W/Input":       "LocalScript",
 		"game/W/Util":        "ModuleScript",
-		"game/W/Index":       "ModuleScript",
+		"game/W/Init":        "ModuleScript",
 		"game/W/lib":         "Folder",
 		"game/W/lib/Deep":    "ModuleScript",
 		"game/W/empty":       "Folder",
@@ -263,14 +263,14 @@ func TestSampleConfig(t *testing.T) {
 
 func TestIgnore(t *testing.T) {
 	files := map[string]string{
-		"s/Keep.luau":           "",
-		"s/x.tmp.luau":          "",
-		"s/A/Inner.luau":        "",
-		"s/B/Inner.luau":        "",
-		"s/C/index.luau":        "",
-		"s/C/Inner.luau":        "",
-		"s/D/index.luau":        "",
-		"s/D/index.server.luau": "",
+		"s/Keep.luau":          "",
+		"s/x.tmp.luau":         "",
+		"s/A/Inner.luau":       "",
+		"s/B/Inner.luau":       "",
+		"s/C/init.luau":        "",
+		"s/C/Inner.luau":       "",
+		"s/D/init.luau":        "",
+		"s/D/init.server.luau": "",
 	}
 
 	tests := []struct {
@@ -279,13 +279,13 @@ func TestIgnore(t *testing.T) {
 	}{
 		{
 			"paths match files",
-			`{paths: ["**/*.tmp.luau", "s/D/index.luau"]}`,
+			`{paths: ["**/*.tmp.luau", "s/D/init.luau"]}`,
 			[]string{"game/W/x.tmp"},
 			[]string{"game/W/Keep", "game/W/D"},
 		},
 		{
 			"paths match folders and their contents",
-			`{paths: ["s/A", "s/D/index.luau"]}`,
+			`{paths: ["s/A", "s/D/init.luau"]}`,
 			[]string{"game/W/A", "game/W/A/Inner"},
 			[]string{"game/W/B/Inner"},
 		},
@@ -323,9 +323,9 @@ func TestIgnore(t *testing.T) {
 	}
 }
 
-// An ignored index file doesn't make its folder a script.
-func TestIgnoredIndexFile(t *testing.T) {
-	tr, _, err := Load(newConfig(t, map[string]string{"s/F/index.luau": ""}, syncW+`ignore: {paths: ["s/F/index.luau"]}`+"\n"))
+// An ignored init file doesn't make its folder a script.
+func TestIgnoredInitFile(t *testing.T) {
+	tr, _, err := Load(newConfig(t, map[string]string{"s/F/init.luau": ""}, syncW+`ignore: {paths: ["s/F/init.luau"]}`+"\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,12 +351,12 @@ func TestLoadRejects(t *testing.T) {
 		ignore string
 		want   string
 	}{
-		{name: "two index files", files: map[string]string{"s/F/index.luau": "", "s/F/index.server.luau": ""}, want: "has both"},
-		{name: "index file in a mount", files: map[string]string{"s/index.luau": ""}, want: "index file"},
+		{name: "two init files", files: map[string]string{"s/F/init.luau": "", "s/F/init.server.luau": ""}, want: "has both"},
+		{name: "init file in a mount", files: map[string]string{"s/init.luau": ""}, want: "init file"},
 		{name: "invalid UTF-8", files: map[string]string{"s/A.luau": "\xff"}, want: "UTF-8"},
-		{name: "invalid UTF-8 in an index file", files: map[string]string{"s/F/index.luau": "\xff"}, want: "UTF-8"},
+		{name: "invalid UTF-8 in an init file", files: map[string]string{"s/F/init.luau": "\xff"}, want: "UTF-8"},
 		{name: "file as a sync path", files: map[string]string{"s": "not a folder"}, want: "not a folder"},
-		{name: "file and index file collide", files: map[string]string{"s/Foo.luau": "", "s/Foo/index.luau": ""}, want: "both a ModuleScript called Foo"},
+		{name: "file and init file collide", files: map[string]string{"s/Foo.luau": "", "s/Foo/init.luau": ""}, want: "both a ModuleScript called Foo"},
 		{name: "bad ignore pattern", ignore: `ignore: {paths: ["a["]}`, want: "not a valid pattern"},
 	}
 	for _, tt := range tests {
@@ -390,9 +390,9 @@ func TestSymlinksInsideAreSkipped(t *testing.T) {
 	}
 	cfg := newConfig(t, map[string]string{"s/A.luau": ""}, syncW)
 	for name, target := range map[string]string{
-		"s/File.luau":  filepath.Join(outside, "Secret.luau"),
-		"s/index.luau": filepath.Join(outside, "Secret.luau"),
-		"s/Dir":        outside,
+		"s/File.luau": filepath.Join(outside, "Secret.luau"),
+		"s/init.luau": filepath.Join(outside, "Secret.luau"),
+		"s/Dir":       outside,
 	} {
 		if err := os.Symlink(target, filepath.Join(cfg.Root, name)); err != nil {
 			t.Fatal(err)

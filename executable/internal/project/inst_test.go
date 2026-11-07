@@ -39,8 +39,8 @@ func TestClassifyInst(t *testing.T) {
 	}{
 		{"Lamp.Part.inst.json", "Lamp", "Part", true},
 		{"a.b.Part.inst.json", "a.b", "Part", true},
-		{"index.Model.inst.json", "index", "Model", true},
-		{"%69ndex.Part.inst.json", "%69ndex", "Part", true},
+		{"init.Model.inst.json", "init", "Model", true},
+		{"%69nit.Part.inst.json", "%69nit", "Part", true},
 		{"Main.Script.inst.json", "Main", "Script", true},
 		{"package.lock.json", "", "", false},
 		{"config.json", "", "", false},
@@ -61,19 +61,19 @@ func TestClassifyInst(t *testing.T) {
 
 func TestLoadNonScripts(t *testing.T) {
 	cfg := newConfig(t, map[string]string{
-		"s/Lamp.Part.inst.json":               `{"props": {"Anchored": {"t": "Bool", "v": true}, "Size": {"t": "Vector3", "v": [4, 1, 2]}}}`,
-		"s/Empty.Part.inst.json":              `{}`,
-		"s/Car/index.Model.inst.json":         `{"props": {"$tags": {"t": "Tags", "v": ["Fast"]}}}`,
-		"s/Car/Wheel.Part.inst.json":          `{}`,
-		"s/Car/Drive.server.luau":             "drive",
-		"s/Main.server.luau":                  "main",
-		"s/Main.Script.inst.json":             `{"props": {"Disabled": {"t": "Bool", "v": true}}}`,
-		"s/Shop/index.luau":                   "shop",
-		"s/Shop/index.ModuleScript.inst.json": `{"props": {"$tags": {"t": "Tags", "v": ["Store"]}}}`,
-		"s/lib/index.Folder.inst.json":        `{"props": {"$tags": {"t": "Tags", "v": ["Code"]}}}`,
-		"s/lib/Util.luau":                     "util",
-		"s/package.lock.json":                 `not read, because it isn't an instance`,
-		"s/config.json":                       `not read either`,
+		"s/Lamp.Part.inst.json":              `{"props": {"Anchored": {"t": "Bool", "v": true}, "Size": {"t": "Vector3", "v": [4, 1, 2]}}}`,
+		"s/Empty.Part.inst.json":             `{}`,
+		"s/Car/init.Model.inst.json":         `{"props": {"$tags": {"t": "Tags", "v": ["Fast"]}}}`,
+		"s/Car/Wheel.Part.inst.json":         `{}`,
+		"s/Car/Drive.server.luau":            "drive",
+		"s/Main.server.luau":                 "main",
+		"s/Main.Script.inst.json":            `{"props": {"Disabled": {"t": "Bool", "v": true}}}`,
+		"s/Shop/init.luau":                   "shop",
+		"s/Shop/init.ModuleScript.inst.json": `{"props": {"$tags": {"t": "Tags", "v": ["Store"]}}}`,
+		"s/lib/init.Folder.inst.json":        `{"props": {"$tags": {"t": "Tags", "v": ["Code"]}}}`,
+		"s/lib/Util.luau":                    "util",
+		"s/package.lock.json":                `not read, because it isn't an instance`,
+		"s/config.json":                      `not read either`,
 	}, syncW)
 	tr, _, err := Load(cfg)
 	if err != nil {
@@ -123,18 +123,18 @@ func TestLoadNonScripts(t *testing.T) {
 // could make the plugin delete it
 func TestLoadRejectsBadInstFiles(t *testing.T) {
 	tests := map[string]map[string]string{
-		"invalid JSON":       {"s/Lamp.Part.inst.json": `{`},
-		"empty file":         {"s/Lamp.Part.inst.json": ``},
-		"two values":         {"s/Lamp.Part.inst.json": `{} {}`},
-		"unknown field":      {"s/Lamp.Part.inst.json": `{"prop": {}}`},
-		"no type":            {"s/Lamp.Part.inst.json": `{"props": {"Size": {"v": [1, 2, 3]}}}`},
-		"a Ref":              {"s/Lamp.Part.inst.json": `{"props": {"Other": {"t": "Ref", "v": "abc"}}}`},
-		"invalid UTF-8":      {"s/Lamp.Part.inst.json": "{\"props\": {\"Name\": {\"t\": \"String\", \"v\": \"\xff\"}}}"},
-		"Source":             {"s/Main.luau": "x", "s/Main.ModuleScript.inst.json": `{"props": {"Source": {"t": "String", "v": "y"}}}`},
-		"file and folder":    {"s/Lamp.Part.inst.json": `{}`, "s/Lamp/index.Part.inst.json": `{}`},
-		"two indexes":        {"s/Lamp/index.Part.inst.json": `{}`, "s/Lamp/index.Model.inst.json": `{}`},
-		"script and class":   {"s/Lamp/index.luau": ``, "s/Lamp/index.Part.inst.json": `{}`},
-		"index on a service": {"s/index.Part.inst.json": `{}`},
+		"invalid JSON":      {"s/Lamp.Part.inst.json": `{`},
+		"empty file":        {"s/Lamp.Part.inst.json": ``},
+		"two values":        {"s/Lamp.Part.inst.json": `{} {}`},
+		"unknown field":     {"s/Lamp.Part.inst.json": `{"prop": {}}`},
+		"no type":           {"s/Lamp.Part.inst.json": `{"props": {"Size": {"v": [1, 2, 3]}}}`},
+		"a Ref":             {"s/Lamp.Part.inst.json": `{"props": {"Other": {"t": "Ref", "v": "abc"}}}`},
+		"invalid UTF-8":     {"s/Lamp.Part.inst.json": "{\"props\": {\"Name\": {\"t\": \"String\", \"v\": \"\xff\"}}}"},
+		"Source":            {"s/Main.luau": "x", "s/Main.ModuleScript.inst.json": `{"props": {"Source": {"t": "String", "v": "y"}}}`},
+		"file and folder":   {"s/Lamp.Part.inst.json": `{}`, "s/Lamp/init.Part.inst.json": `{}`},
+		"two indexes":       {"s/Lamp/init.Part.inst.json": `{}`, "s/Lamp/init.Model.inst.json": `{}`},
+		"script and class":  {"s/Lamp/init.luau": ``, "s/Lamp/init.Part.inst.json": `{}`},
+		"init on a service": {"s/init.Part.inst.json": `{}`},
 	}
 	for name, files := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -247,9 +247,9 @@ func TestApplyRenamesAndMovesParts(t *testing.T) {
 
 	// with children it's a folder, which moves whole
 	f.apply(protocol.Patch{Added: []protocol.Instance{script("glow", "lamp", "Glow", "Script", "glow")}})
-	f.assertFile("s/lib/Light/index.Part.inst.json", want)
+	f.assertFile("s/lib/Light/init.Part.inst.json", want)
 	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: "lamp", Parent: w, Name: "Lamp"}}})
-	f.assertFile("s/Lamp/index.Part.inst.json", want)
+	f.assertFile("s/Lamp/init.Part.inst.json", want)
 	f.assertFile("s/Lamp/Glow.server.luau", "glow")
 	f.assertMissing("s/lib/Light")
 }
@@ -263,7 +263,7 @@ func TestApplyPartGetsChildren(t *testing.T) {
 		{ID: "light", Parent: "lamp", Name: "Glow", Class: "PointLight", Props: boolProp("Enabled", false)},
 	}})
 	f.assertMissing("s/Lamp.Part.inst.json")
-	f.assertFile("s/Lamp/index.Part.inst.json", propsFile(`"Anchored": {"t":"Bool","v":true}`))
+	f.assertFile("s/Lamp/init.Part.inst.json", propsFile(`"Anchored": {"t":"Bool","v":true}`))
 	f.assertFile("s/Lamp/Glow.PointLight.inst.json", propsFile(`"Enabled": {"t":"Bool","v":false}`))
 }
 
@@ -305,8 +305,8 @@ func TestPropsFileFollowsItsScript(t *testing.T) {
 
 	// getting a child turns it into a folder, and the file goes inside
 	f.apply(protocol.Patch{Added: []protocol.Instance{script("kid", id, "Kid", "ModuleScript", "kid")}})
-	f.assertFile("s/lib/Boot/index.server.luau", "x")
-	f.assertFile("s/lib/Boot/index.Script.inst.json", want)
+	f.assertFile("s/lib/Boot/init.server.luau", "x")
+	f.assertFile("s/lib/Boot/init.Script.inst.json", want)
 	f.assertMissing("s/lib/Boot.Script.inst.json")
 
 	got := f.restart()
@@ -377,14 +377,14 @@ func TestFolderProps(t *testing.T) {
 	}})
 
 	// only a folder with something to store has a file, to keep the source tree clean
-	f.assertMissing("s/Plain/index.Folder.inst.json")
-	f.assertFile("s/lib/index.Folder.inst.json", propsFile(`"$tags": {"t":"Tags","v":["Code"]}`))
+	f.assertMissing("s/Plain/init.Folder.inst.json")
+	f.assertFile("s/lib/init.Folder.inst.json", propsFile(`"$tags": {"t":"Tags","v":["Code"]}`))
 
 	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: "plain", Props: tags}}})
-	f.assertFile("s/Plain/index.Folder.inst.json", propsFile(`"$tags": {"t":"Tags","v":["Code"]}`))
+	f.assertFile("s/Plain/init.Folder.inst.json", propsFile(`"$tags": {"t":"Tags","v":["Code"]}`))
 
 	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: "lib", Name: "code"}}})
-	f.assertFile("s/code/index.Folder.inst.json", propsFile(`"$tags": {"t":"Tags","v":["Code"]}`))
+	f.assertFile("s/code/init.Folder.inst.json", propsFile(`"$tags": {"t":"Tags","v":["Code"]}`))
 	if f.restart()["game/W/code"].Class != "Folder" {
 		t.Error("code should still be a Folder")
 	}
@@ -422,7 +422,7 @@ func TestApplyDangerousNamesAndClasses(t *testing.T) {
 	f := newFixture(t, nil, syncW)
 	w := f.ref("game/W")
 
-	names := []string{"../../escape", "index", "NUL", ".git", "a.Part.inst.json", "x.server", "tricky."}
+	names := []string{"../../escape", "init", "NUL", ".git", "a.Part.inst.json", "x.server", "tricky."}
 	var added []protocol.Instance
 	for _, name := range names {
 		added = append(added, protocol.Instance{ID: protocol.Ref("id-" + name), Parent: w, Name: name, Class: "Part"})
@@ -437,7 +437,7 @@ func TestApplyDangerousNamesAndClasses(t *testing.T) {
 	}
 
 	// a class is part of the file name, and it comes from the client too
-	for _, class := range []string{"../../escape", "a/b", "a.b", "", "index.luau"} {
+	for _, class := range []string{"../../escape", "a/b", "a.b", "", "init.luau"} {
 		_, errs := Apply(f.cfg, f.tree, f.mounts, protocol.Patch{Added: []protocol.Instance{
 			{ID: protocol.Ref("bad-" + class), Parent: w, Name: "Bad", Class: class},
 		}})
@@ -518,8 +518,8 @@ func TestSameNamePartsLifecycle(t *testing.T) {
 	f.apply(protocol.Patch{Added: []protocol.Instance{{ID: "kid", Parent: "second", Name: "Glow", Class: "PointLight"}}})
 	f.assertMissing(second + ".Part.inst.json")
 	f.assertFile(second+"/Glow.PointLight.inst.json", "{}\n")
-	if !strings.Contains(f.read(second+"/index.Part.inst.json"), `"name": "Part"`) {
-		t.Errorf("no name in %s", f.read(second+"/index.Part.inst.json"))
+	if !strings.Contains(f.read(second+"/init.Part.inst.json"), `"name": "Part"`) {
+		t.Errorf("no name in %s", f.read(second+"/init.Part.inst.json"))
 	}
 
 	// the first, with children too, needs a folder with the same name. it's the first's
@@ -528,19 +528,19 @@ func TestSameNamePartsLifecycle(t *testing.T) {
 
 	// a rename to a free name loses the tag, and the name and id it needed
 	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: "second", Name: "Lamp"}}})
-	f.assertFile("s/Lamp/index.Part.inst.json", propsFile(`"Anchored": {"t":"Bool","v":true}`))
+	f.assertFile("s/Lamp/init.Part.inst.json", propsFile(`"Anchored": {"t":"Bool","v":true}`))
 	f.assertMissing(second)
 
 	// a rename onto a taken name gets one
 	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: "second", Name: "Part"}}})
 	f.assertMissing("s/Lamp")
-	if !strings.Contains(f.read(second+"/index.Part.inst.json"), `"id": "second"`) {
-		t.Errorf("no id in %s", f.read(second+"/index.Part.inst.json"))
+	if !strings.Contains(f.read(second+"/init.Part.inst.json"), `"id": "second"`) {
+		t.Errorf("no id in %s", f.read(second+"/init.Part.inst.json"))
 	}
 
 	// a move to where it's the only one loses it too
 	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: "second", Parent: lib}}})
-	f.assertFile("s/lib/Part/index.Part.inst.json", propsFile(`"Anchored": {"t":"Bool","v":true}`))
+	f.assertFile("s/lib/Part/init.Part.inst.json", propsFile(`"Anchored": {"t":"Bool","v":true}`))
 	f.assertMissing(second)
 
 	f.apply(protocol.Patch{Removed: []protocol.Ref{"first", "kid2"}})
@@ -663,13 +663,13 @@ func TestLoadUsesStoredNameAndId(t *testing.T) {
 		"s/A.Part.inst.json":         `{"id": "one", "name": "Wheel"}`,
 		"s/B.Part.inst.json":         `{"id": "two", "name": "Wheel"}`,
 		"s/C.Part.inst.json":         `{"name": "Wheel"}`,
-		"s/D/index.Model.inst.json":  `{"id": "three", "name": "Car"}`,
+		"s/D/init.Model.inst.json":   `{"id": "three", "name": "Car"}`,
 		"s/E.luau":                   "x",
 		"s/E.ModuleScript.inst.json": `{"id": "four", "name": "Util"}`,
-		"s/F/index.server.luau":      "y",
-		"s/F/index.Script.inst.json": `{"id": "five", "name": "Run"}`,
-		"s/G/index.Folder.inst.json": `{"id": "six", "name": "lib"}`,
-		"s/H/index.Folder.inst.json": `{}`,
+		"s/F/init.server.luau":       "y",
+		"s/F/init.Script.inst.json":  `{"id": "five", "name": "Run"}`,
+		"s/G/init.Folder.inst.json":  `{"id": "six", "name": "lib"}`,
+		"s/H/init.Folder.inst.json":  `{}`,
 		"s/H/Kid.Part.inst.json":     `{"id": "seven"}`,
 	}, syncW))
 	if err != nil {
@@ -737,7 +737,7 @@ func TestApplyIgnoredInstFiles(t *testing.T) {
 	}
 	f.assertFile("s/Main.server.luau", "x")
 	f.assertMissing("s/Main.Script.inst.json")
-	f.assertMissing("s/lib/index.Folder.inst.json")
+	f.assertMissing("s/lib/init.Folder.inst.json")
 	f.assertNoEcho()
 }
 

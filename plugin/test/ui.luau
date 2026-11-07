@@ -6,7 +6,7 @@ local process = require("@lune/process")
 local roblox = require("@lune/roblox")
 
 local MODULE_FILES = {
-	Ui = "src/Verde/Ui/index.luau",
+	Ui = "src/Verde/Ui/init.luau",
 	Theme = "src/Verde/Ui/Theme.luau",
 	Kit = "src/Verde/Ui/Kit.luau",
 	Toasts = "src/Verde/Ui/Toasts.luau",

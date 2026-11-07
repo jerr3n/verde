@@ -47,7 +47,7 @@ To exercise the rest:
 
 | Module | Job |
 |---|---|
-| `index.server.luau` | Entry point. Exits during Play, then runs the main loop |
+| `init.server.luau` | Entry point. Exits during Play, then runs the main loop |
 | `Ui` | The panel's Sync, Activity and Settings tabs |
 | `Ui/Toasts` | Pop-up notifications over the 3D view |
 | `Ui/Kit`, `Ui/Theme` | Shared building blocks, and colors that follow Studio's theme |
@@ -168,7 +168,7 @@ lune run test/ui.luau
 The first suite runs the real sync modules against a fake Studio
 (`test/fake_studio.luau`), using real Roblox data types and deferred events. The UI
 suite checks the panel, activity feed, pop-ups and settings against real Roblox
-instance property types with fake plugin events and tweens. `index.server.luau` isn't
+instance property types with fake plugin events and tweens. `init.server.luau` isn't
 covered.
 
 Lune doesn't render UI. In Studio, also check:

@@ -37,8 +37,8 @@ func encodeName(name string) string {
 			s = stem + "%2E" + suffix[1:]
 		}
 	}
-	// index.luau means "the script of this folder", and Windows reserves some names.
-	if s == "index" || isReservedOnWindows(s) {
+	// init.luau means "the script of this folder", and Windows reserves some names.
+	if s == "init" || isReservedOnWindows(s) {
 		s = fmt.Sprintf("%%%02X", s[0]) + s[1:]
 	}
 	return s

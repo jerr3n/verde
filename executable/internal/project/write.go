@@ -111,7 +111,7 @@ func newWriter(cfg *config.Cfg, t *tree.Tree, mounts []protocol.Mount, root *os.
 type writer struct {
 	tree     *tree.Tree
 	root     *os.Root
-	scan     *loader // shares the scan's rules for index files and ignores
+	scan     *loader // shares the scan's rules for init files and ignores
 	mounts   map[protocol.Ref]bool
 	syncDirs map[protocol.Ref]string // sync mounts -> their folders
 
@@ -394,7 +394,7 @@ func (w *writer) chooseTarget(dir string, inst protocol.Instance, asDir bool, cu
 func propsFileFor(target, class string, asDir bool) string {
 	switch {
 	case asDir:
-		return indexProps(target, class)
+		return initProps(target, class)
 	case scriptSuffix(class) != "":
 		return scriptProps(target, class)
 	}
@@ -420,7 +420,7 @@ func (w *writer) takenInOtherCase(dir, name, class, current string) bool {
 		if !entry.IsDir() {
 			return true
 		}
-		if index, err := w.scan.findIndex(full); err == nil && indexClass(index) == class {
+		if init, err := w.scan.findInit(full); err == nil && initClass(init) == class {
 			return true
 		}
 	}
@@ -576,7 +576,7 @@ func (w *writer) createOnDisk(inst protocol.Instance) error {
 		if err := w.root.Mkdir(target, 0o755); err != nil {
 			return err
 		}
-		loc = location{path: target, props: indexProps(target, inst.Class), dir: true}
+		loc = location{path: target, props: initProps(target, inst.Class), dir: true}
 	case scriptSuffix(inst.Class) != "":
 		text, err := sourceText(inst)
 		if err != nil {
@@ -848,7 +848,7 @@ func (w *writer) search(dir string, inst protocol.Instance) (location, bool) {
 }
 
 // an entry's name without its suffix, if it could hold an instance of class. a folder
-// could, depending on its index
+// could, depending on its init
 func entryStem(entry fs.DirEntry, class string) (string, bool) {
 	switch {
 	case entry.IsDir():
@@ -857,10 +857,10 @@ func entryStem(entry fs.DirEntry, class string) (string, bool) {
 		return "", false
 	case scriptSuffix(class) != "":
 		name, found, ok := classify(entry.Name())
-		return name, ok && found == class && !isIndex(entry.Name())
+		return name, ok && found == class && !isInit(entry.Name())
 	}
 	name, found, ok := classifyInst(entry.Name())
-	return name, ok && found == class && name != "index"
+	return name, ok && found == class && name != "init"
 }
 
 // where an instance of class is, given the entry holding it
@@ -868,13 +868,13 @@ func (w *writer) entryLocation(dir string, entry fs.DirEntry, class string) (loc
 	full := path.Join(dir, entry.Name())
 	isScript := scriptSuffix(class) != ""
 	if entry.IsDir() {
-		index, err := w.scan.findIndex(full)
-		if err != nil || indexClass(index) != class {
+		init, err := w.scan.findInit(full)
+		if err != nil || initClass(init) != class {
 			return location{}, false
 		}
-		loc := location{path: full, props: indexProps(full, class), dir: true}
+		loc := location{path: full, props: initProps(full, class), dir: true}
 		if isScript {
-			loc.file = path.Join(full, index)
+			loc.file = path.Join(full, init)
 		}
 		return loc, true
 	}
@@ -909,7 +909,7 @@ func (w *writer) holds(loc location, stem string, inst protocol.Instance) bool {
 }
 
 // returns the folder an instance's children go in, creating it if needed. Foo.luau becomes
-// Foo/index.luau the first time, and Lamp.Part.inst.json becomes Lamp/index.Part.inst.json
+// Foo/init.luau the first time, and Lamp.Part.inst.json becomes Lamp/init.Part.inst.json
 func (w *writer) childDir(id protocol.Ref) (string, error) {
 	if dir, ok := w.syncDirs[id]; ok {
 		return dir, w.root.MkdirAll(dir, 0o755)
@@ -930,14 +930,14 @@ func (w *writer) childDir(id protocol.Ref) (string, error) {
 	if tag := tagFor(id); w.exists(dir) && !strings.HasSuffix(dir, tag) {
 		dir += tag
 	}
-	index := path.Join(dir, "index"+suffix)
+	init := path.Join(dir, "init"+suffix)
 	if err := w.checkPath(dir); err != nil {
 		return "", err
 	}
-	if err := w.checkPath(index); err != nil {
+	if err := w.checkPath(init); err != nil {
 		return "", err
 	}
-	if err := w.checkPath(indexProps(dir, inst.Class)); err != nil {
+	if err := w.checkPath(initProps(dir, inst.Class)); err != nil {
 		return "", err
 	}
 	if err := w.checkFree(dir); err != nil {
@@ -947,20 +947,20 @@ func (w *writer) childDir(id protocol.Ref) (string, error) {
 		return "", err
 	}
 	separate := w.hasSeparateProps(loc)
-	if err := w.root.Rename(loc.path, index); err != nil {
+	if err := w.root.Rename(loc.path, init); err != nil {
 		w.root.Remove(dir)
 		return "", err
 	}
 	if separate {
-		if err := w.root.Rename(loc.props, indexProps(dir, inst.Class)); err != nil {
-			w.root.Rename(index, loc.path)
+		if err := w.root.Rename(loc.props, initProps(dir, inst.Class)); err != nil {
+			w.root.Rename(init, loc.path)
 			w.root.Remove(dir)
 			return "", err
 		}
 	}
-	moved := location{path: dir, props: indexProps(dir, inst.Class), dir: true}
+	moved := location{path: dir, props: initProps(dir, inst.Class), dir: true}
 	if loc.file != "" {
-		moved.file = index
+		moved.file = init
 	}
 	// a tag means the name doesn't match anymore, so the file has to say what it is
 	if strings.HasSuffix(dir, tagFor(id)) {

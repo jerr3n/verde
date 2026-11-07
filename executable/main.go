@@ -7,6 +7,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
+	"github.com/jerr3n/verde/executable/internal/build"
 	"github.com/jerr3n/verde/executable/internal/config"
 	"github.com/jerr3n/verde/executable/internal/logging"
 	"github.com/jerr3n/verde/executable/internal/project"
@@ -94,6 +95,38 @@ func main() {
 						return err
 					}
 					return serve(ctx, logger, cfg)
+				},
+			},
+			{
+				Name:  "build",
+				Usage: "build the project's files into a place file",
+				Flags: []cli.Flag{
+					&cli.StringFlag{
+						Name:     "output",
+						Aliases:  []string{"o"},
+						Usage:    "where to write the place, such as game.rbxlx",
+						Required: true,
+					},
+				},
+				Action: func(ctx context.Context, command *cli.Command) error {
+					cfg, err := config.Load(config.DefaultPath)
+					if err != nil {
+						return err
+					}
+					t, _, err := project.Load(cfg)
+					if err != nil {
+						return err
+					}
+					output := command.String("output")
+					warnings, err := build.WriteFile(output, t)
+					if err != nil {
+						return err
+					}
+					for _, warning := range warnings {
+						fmt.Fprintln(os.Stderr, "warning:", warning)
+					}
+					fmt.Printf("Built %s with %d instances.\n", output, t.Len()-1) // not counting the DataModel
+					return nil
 				},
 			},
 		},

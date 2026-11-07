@@ -135,6 +135,7 @@ Studio and gives it a new Ref. That's fine at first. Detecting real renames can 
 - [x] Give siblings with the same name their own files.
 - [ ] Store `Ref` properties in files.
 - [x] Add a `verde init` command that generates `project.yml`.
+- [x] Add a `verde build` command that writes a place file (see [Building a place](#building-a-place)).
 - [ ] Add end-to-end Go tests that connect as a plugin and check the messages and files.
 - [ ] Run the manual Studio checks in `README.md`.
 - [ ] Test large projects. Roblox doesn't document a message size limit, so big snapshots
@@ -249,6 +250,26 @@ src/workspace/
 - A file with no id belongs to the only instance with its name and class, so two of those is
   an error, and so is two files with the same id. Copying a file makes that error: remove the
   id from the copy.
+
+## Building a place
+
+`verde build -o game.rbxlx` writes the project's files as a place, without a server or Studio.
+The same files give the same bytes, so two builds can be compared.
+
+Only XML places (`.rbxlx`) are written, not binary ones (`.rbxl`) or models (`.rbxmx`).
+
+The wire format doesn't say everything a place file needs: a `Number` could be a float, double
+or int, `Size` is saved as `size`, and an `Enum` is saved as a number. That comes from
+`internal/build/reflection.json`, a trimmed copy of rbx-dom's database. Run
+`go generate ./internal/build` to update it when Roblox adds classes.
+
+- A property the database doesn't know, or one whose value doesn't fit its type, is left out
+  with a warning. Everything else still builds.
+- A script whose `Source` XML can't hold, like one with a `\x01` in it, stops the build. So does
+  a name with such a character.
+- A place only has what's in the files. `Ref` properties, service properties and Terrain aren't
+  stored there yet, so they aren't in it. The builder writes a `Ref` when the tree has one, but
+  loading from files can't produce one until they're stored.
 
 ## Wire protocol
 

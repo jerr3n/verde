@@ -65,6 +65,15 @@ local UNSYNCED_REFLECTION = {
 	{ Name = "Position", Serialized = false, Display = { Category = "Data" } },
 	{ Name = "HiddenThing", Serialized = true, Display = nil },
 	{ Name = "OldThing", Serialized = true, Display = { Category = "Data", DeprecationMessage = "Don't" } },
+	{ Name = "archivable", Serialized = true, Display = { Category = "Data" } },
+}
+
+-- Properties real Studio saves under another name. Reflection reports that name as the
+-- serialized one, and the real one as not serialized. Reading or writing the saved name
+-- fails here, so a plugin that syncs it fails the way it would in Studio.
+local SAVED_AS: { [string]: { name: string, hidden: boolean } } = {
+	Size = { name = "size", hidden = false },
+	Color = { name = "Color3uint8", hidden = true },
 }
 
 -- Stored in single precision, like many real properties, so it reads back rounded.
@@ -332,8 +341,17 @@ function FakeStudio.new()
 				error("unknown class", 0)
 			end
 			local out = table.clone(UNSYNCED_REFLECTION)
+			local display = { Category = "Data" }
 			for name in class.props do
-				table.insert(out, { Name = name, Serialized = true, Display = { Category = "Data" } })
+				local saved = SAVED_AS[name]
+				table.insert(out, { Name = name, Serialized = saved == nil, Display = display })
+				if saved then
+					table.insert(out, {
+						Name = saved.name,
+						Serialized = true,
+						Display = if saved.hidden then nil else display,
+					})
+				end
 			end
 			return out
 		end,

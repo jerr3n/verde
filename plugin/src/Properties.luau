@@ -29,6 +29,32 @@ local SKIPPED: { [string]: boolean } = {
 	Archivable = true,
 }
 
+--[[
+	Properties Studio saves under another name. Reflection marks that name as the serialized
+	one, not the real one, but writing to it can fail with "size is not a valid member of Part".
+	Each is synced under its real name instead.
+
+	The list comes from rbx-dom's patches, leaving out what's only on services, which aren't
+	synced, and what scripts have no property for.
+]]
+local REAL_NAMES: { [string]: string } = {
+	archivable = "Archivable",
+	Color3uint8 = "Color",
+	DefinesCapabilities = "Sandboxed",
+	EmitterSize = "RollOffMinDistance",
+	formFactorRaw = "FormFactor",
+	heat_xml = "Heat",
+	MaterialVariantSerialized = "MaterialVariant",
+	opacity_xml = "Opacity",
+	Part0Internal = "Part0",
+	Part1Internal = "Part1",
+	riseVelocity_xml = "RiseVelocity",
+	shape = "Shape",
+	size = "Size",
+	size_xml = "Size",
+	xmlRead_MaxDistance_3 = "RollOffMaxDistance",
+}
+
 local namesByClass: { [string]: { string } } = {}
 local defaultsByClass: { [string]: { [string]: string } } = {}
 
@@ -47,10 +73,17 @@ function Properties.names(className: string): { string }
 		return ReflectionService:GetPropertiesOfClass(className)
 	end)
 	if ok then
+		local seen: { [string]: boolean } = {}
 		for _, property in result :: any do
+			local name = property.Name
 			local display = property.Display
-			if property.Serialized and display and not display.DeprecationMessage and not SKIPPED[property.Name] then
-				table.insert(names, property.Name)
+			-- A saved name is often hidden or deprecated, which says nothing about the real one.
+			local real = REAL_NAMES[name]
+			local wanted = property.Serialized and (real ~= nil or (display and not display.DeprecationMessage))
+			name = real or name
+			if wanted and not SKIPPED[name] and not seen[name] then
+				seen[name] = true
+				table.insert(names, name)
 			end
 		end
 	else

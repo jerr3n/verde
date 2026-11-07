@@ -562,6 +562,37 @@ test("properties reflection rules out aren't sent", function()
 	check(not table.find(names, "Position"), "not saved with the place")
 	check(not table.find(names, "HiddenThing"), "hidden")
 	check(not table.find(names, "OldThing"), "deprecated")
+	check(not table.find(names, "archivable"), "the saved name of a property that isn't synced")
+end)
+
+test("a property saved under another name syncs under its real name", function()
+	local world = FakeStudio.new()
+	local names = world.modules.Properties.names("Part")
+	check(table.find(names, "Size"), "should include Size")
+	check(table.find(names, "Color"), "should include Color, which reflection hides")
+	check(not table.find(names, "size"), "not the saved name")
+	check(not table.find(names, "Color3uint8"), "not the hidden saved name")
+end)
+
+test("changing a Part's size sends Size, and Size from the server applies", function()
+	local world, sync, sent = setup()
+	connect(world, sync, {
+		{ id = "p", parent = "rs", name = "P", class = "Part" },
+	})
+	local part = world.service("ReplicatedStorage"):FindFirstChild("P")
+
+	part.Size = Vector3.new(20, 1, 2)
+	settle(world, sync)
+	local update = sent[#sent].updated[1]
+	eq(update.id, "p")
+	eq(update.props.size, nil, "saved name")
+	eq(update.props.Size.t, "Vector3")
+	eq(update.props.Size.v[1], 20)
+
+	sync:applyPatch({ updated = { { id = "p", props = { Size = { t = "Vector3", v = { 7, 8, 9 } } } } } })
+	settle(world, sync)
+	eq(part.Size, Vector3.new(7, 8, 9))
+	eq(#world.warnings, 0, "warnings")
 end)
 
 test("Ref properties inside a new subtree resolve; ones outside are left out", function()

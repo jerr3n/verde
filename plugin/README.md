@@ -136,7 +136,9 @@ Scripts are instances with one special property, `Source`.
 ### Other instances
 
 Any class works. The plugin asks `ReflectionService` which properties each class
-saves with the place, so there's no property list to maintain.
+saves with the place, so there's no property list to maintain. The exception is the
+few saved under another name, like `Size` as `size` and `Color` as `Color3uint8`,
+which `Properties.luau` lists.
 
 - New instances send only the properties that differ from a fresh instance of that
   class, plus `Source`. A Part sends a few values rather than dozens.
@@ -172,8 +174,9 @@ It can't catch wrong assumptions about Studio itself. These still have to be
 checked in real Studio:
 
 1. **Property discovery.** Paste this in the command bar. It should list things like
-   `Anchored`, `Size` and `CFrame`, but not `Position`. If it prints nothing, only
-   scripts will sync.
+   `Anchored`, `size` and `CFrame`, but not `Position`. If it prints nothing, only
+   scripts will sync. `size` is the name `Size` is saved under, and `Properties.luau`
+   syncs names like that under their real ones.
    ```lua
    for _, p in game:GetService("ReflectionService"):GetPropertiesOfClass("Part") do
        if p.Serialized and p.Display and not p.Display.DeprecationMessage then print(p.Name) end

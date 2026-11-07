@@ -1,0 +1,15 @@
+# The Studio plugin, as a Verde project. Build it with:
+#   verde build -o Verde.rbxmx -i ServerStorage/Verde
+version: 0
+name: verde-plugin
+serve:
+  address: 127.0.0.1
+  port: 45679
+  placeIds: []
+sync:
+  - instance: ServerStorage
+    path: src
+ignore:
+  paths: ["**/*.tmp", "**/.DS_Store"]
+conflicts:
+  onConnect: disk

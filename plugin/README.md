@@ -5,14 +5,22 @@ Connects Roblox Studio to the Verde server and keeps both sides in sync.
 
 ## Install
 
+The plugin is a Verde project, so building it takes an up-to-date `verde`. Run
+`make install` from the repo root if you don't have one.
+
 ```sh
 cd plugin
-rojo build default.project.json -o Verde.rbxm
+verde build -o Verde.rbxmx -i ServerStorage/Verde
 ```
 
-Copy `Verde.rbxm` into Studio's Plugins folder (**Plugins tab → Plugins Folder**)
-and restart Studio. Delete `verde_test.lua` from there if you still have it: it
-connects on every load, and Studio only allows a few connections at once.
+Copy `Verde.rbxmx` into Studio's Plugins folder (**Plugins tab → Plugins Folder**)
+and restart Studio. Delete any older `Verde.rbxm` from there, or the plugin loads
+twice. Delete `verde_test.lua` too if you still have it: it connects on every load,
+and Studio only allows a few connections at once.
+
+The source is in `src/Verde`. `project.yml` syncs `src` to `ServerStorage`, because a
+model has to be an instance inside a sync target. `verde serve` from this folder uses
+port 45679, so it can run next to a game's project.
 
 ## Try it without the backend
 
@@ -39,7 +47,7 @@ To exercise the rest:
 
 | Module | Job |
 |---|---|
-| `init.server.luau` | Entry point. Exits during Play, then runs the main loop |
+| `index.server.luau` | Entry point. Exits during Play, then runs the main loop |
 | `Ui` | The panel's Sync, Activity and Settings tabs |
 | `Ui/Toasts` | Pop-up notifications over the 3D view |
 | `Ui/Kit`, `Ui/Theme` | Shared building blocks, and colors that follow Studio's theme |
@@ -160,7 +168,7 @@ lune run test/ui.luau
 The first suite runs the real sync modules against a fake Studio
 (`test/fake_studio.luau`), using real Roblox data types and deferred events. The UI
 suite checks the panel, activity feed, pop-ups and settings against real Roblox
-instance property types with fake plugin events and tweens. `init.server.luau` isn't
+instance property types with fake plugin events and tweens. `index.server.luau` isn't
 covered.
 
 Lune doesn't render UI. In Studio, also check:

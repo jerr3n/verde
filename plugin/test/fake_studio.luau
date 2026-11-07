@@ -24,7 +24,7 @@ local MODULE_NAMES = { "Values", "Properties", "Sync", "Connection", "Notificati
 -- Read up front, because reading a file can't yield inside a metamethod.
 local sources: { [string]: string } = {}
 for _, name in MODULE_NAMES do
-	sources[name] = fs.readFile(`src/{name}.luau`)
+	sources[name] = fs.readFile(`src/Verde/{name}.luau`)
 end
 
 local SCRIPT_DEFAULTS = { Source = "", Disabled = false }

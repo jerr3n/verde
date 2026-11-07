@@ -135,7 +135,7 @@ Studio and gives it a new Ref. That's fine at first. Detecting real renames can 
 - [x] Give siblings with the same name their own files.
 - [ ] Store `Ref` properties in files.
 - [x] Add a `verde init` command that generates `project.yml`.
-- [x] Add a `verde build` command that writes a place file (see [Building a place](#building-a-place)).
+- [x] Add a `verde build` command that writes place and model files (see [Building a place](#building-a-place)).
 - [ ] Add end-to-end Go tests that connect as a plugin and check the messages and files.
 - [ ] Run the manual Studio checks in `README.md`.
 - [ ] Test large projects. Roblox doesn't document a message size limit, so big snapshots
@@ -254,9 +254,14 @@ src/workspace/
 ## Building a place
 
 `verde build -o game.rbxlx` writes the project's files as a place, without a server or Studio.
-The same files give the same bytes, so two builds can be compared.
+`verde build -o Car.rbxmx --instance Workspace/Car` writes one instance and everything inside it
+as a model. The same files give the same bytes, so two builds can be compared.
 
-Only XML places (`.rbxlx`) are written, not binary ones (`.rbxl`) or models (`.rbxmx`).
+Only the XML formats are written, not the binary ones (`.rbxl` and `.rbxm`).
+
+- A model can't be a service or another sync target, since those already exist in every game.
+- A path that fits two same-named siblings is an error, because it can't say which one you mean.
+- A `Ref` to something outside a model is left out with a warning.
 
 The wire format doesn't say everything a place file needs: a `Number` could be a float, double
 or int, `Size` is saved as `size`, and an `Enum` is saved as a number. That comes from

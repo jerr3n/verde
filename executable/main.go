@@ -99,13 +99,18 @@ func main() {
 			},
 			{
 				Name:  "build",
-				Usage: "build the project's files into a place file",
+				Usage: "build the project's files into a place or model file",
 				Flags: []cli.Flag{
 					&cli.StringFlag{
 						Name:     "output",
 						Aliases:  []string{"o"},
-						Usage:    "where to write the place, such as game.rbxlx",
+						Usage:    "where to write it: game.rbxlx for a place, or Car.rbxmx for a model",
 						Required: true,
+					},
+					&cli.StringFlag{
+						Name:    "instance",
+						Aliases: []string{"i"},
+						Usage:   "what a model holds, such as Workspace/Car",
 					},
 				},
 				Action: func(ctx context.Context, command *cli.Command) error {
@@ -113,19 +118,19 @@ func main() {
 					if err != nil {
 						return err
 					}
-					t, _, err := project.Load(cfg)
+					t, mounts, err := project.Load(cfg)
 					if err != nil {
 						return err
 					}
 					output := command.String("output")
-					warnings, err := build.WriteFile(output, t)
+					result, err := build.WriteFile(output, t, mounts, command.String("instance"))
 					if err != nil {
 						return err
 					}
-					for _, warning := range warnings {
+					for _, warning := range result.Warnings {
 						fmt.Fprintln(os.Stderr, "warning:", warning)
 					}
-					fmt.Printf("Built %s with %d instances.\n", output, t.Len()-1) // not counting the DataModel
+					fmt.Printf("Built %s with %d instances.\n", output, result.Instances)
 					return nil
 				},
 			},

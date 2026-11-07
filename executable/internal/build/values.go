@@ -110,7 +110,7 @@ func (b *builder) element(name, dataType string, value protocol.Value) (string, 
 		}
 		referent, ok := b.referents[target]
 		if !ok {
-			return "", fmt.Errorf("it points at %s, which isn't in the project", target)
+			return "", fmt.Errorf("it points at %s, which isn't in this file", target)
 		}
 		return tag("Ref", name, referent), nil
 

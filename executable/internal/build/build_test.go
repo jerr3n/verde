@@ -49,11 +49,11 @@ func newTree(t *testing.T, instances ...protocol.Instance) *tree.Tree {
 func build(t *testing.T, tr *tree.Tree) (string, []string) {
 	t.Helper()
 	var out bytes.Buffer
-	warnings, err := Write(&out, tr)
+	result, err := Write(&out, tr)
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	return out.String(), warnings
+	return out.String(), result.Warnings
 }
 
 func onePart(t *testing.T, class string, props map[string]protocol.Value) (string, []string) {
@@ -253,7 +253,7 @@ func TestWriteFile(t *testing.T) {
 	dir := t.TempDir()
 
 	path := filepath.Join(dir, "game.rbxlx")
-	if _, err := WriteFile(path, tr); err != nil {
+	if _, err := WriteFile(path, tr, nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(path)
@@ -264,8 +264,8 @@ func TestWriteFile(t *testing.T) {
 		t.Errorf("unexpected file: %s", data)
 	}
 
-	for _, bad := range []string{"game.rbxl", "game.rbxmx", "game"} {
-		if _, err := WriteFile(filepath.Join(dir, bad), tr); err == nil {
+	for _, bad := range []string{"game.rbxl", "game.rbxm", "game"} {
+		if _, err := WriteFile(filepath.Join(dir, bad), tr, nil, ""); err == nil {
 			t.Errorf("WriteFile(%s) worked, want an error", bad)
 		}
 	}
@@ -363,16 +363,33 @@ func TestLuneReadsWhatWasBuilt(t *testing.T) {
 		t.Skip("lune isn't installed")
 	}
 
-	tr := newTree(t, everyType()...)
-	expected := map[protocol.Ref]protocol.Instance{}
-	dir := t.TempDir()
-	place := filepath.Join(dir, "game.rbxlx")
-	warnings, err := WriteFile(place, tr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(warnings) > 0 {
-		t.Errorf("warnings: %q", warnings)
+	t.Run("place", func(t *testing.T) {
+		tr := newTree(t, everyType()...)
+		place := filepath.Join(t.TempDir(), "game.rbxlx")
+		result, err := WriteFile(place, tr, nil, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkWithLune(t, lune, place, tr, tr.Children("game"), result)
+	})
+
+	// The Model holds Parts with every kind of value, and Refs that stay inside it.
+	t.Run("model", func(t *testing.T) {
+		tr := newTree(t, everyType()...)
+		model := filepath.Join(t.TempDir(), "Car.rbxmx")
+		result, err := WriteFile(model, tr, nil, "Workspace/Car")
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkWithLune(t, lune, model, tr, []protocol.Ref{"car"}, result)
+	})
+}
+
+// checkWithLune reads a built file and compares every instance under roots with the tree.
+func checkWithLune(t *testing.T, lune, file string, tr *tree.Tree, roots []protocol.Ref, result Result) {
+	t.Helper()
+	if len(result.Warnings) > 0 {
+		t.Errorf("warnings: %q", result.Warnings)
 	}
 
 	type wantedEntry struct {
@@ -381,51 +398,69 @@ func TestLuneReadsWhatWasBuilt(t *testing.T) {
 		Class string                    `json:"class"`
 		Props map[string]protocol.Value `json:"props"`
 	}
-	paths := map[protocol.Ref][]string{"game": {}}
+	expected := map[protocol.Ref]protocol.Instance{}
 	wanted := []wantedEntry{}
-	for _, inst := range tr.All() {
-		if inst.ID == "game" {
-			continue
+	var visit func(id protocol.Ref, parentPath []string)
+	visit = func(id protocol.Ref, parentPath []string) {
+		inst, ok := tr.Get(id)
+		if !ok {
+			t.Fatalf("instance %s not found", id)
 		}
-		paths[inst.ID] = append(append([]string{}, paths[inst.Parent]...), inst.Name)
-		expected[inst.ID] = inst
+		path := append(append([]string{}, parentPath...), inst.Name)
+		expected[id] = inst
 		props := inst.Props
 		if props == nil {
 			props = map[string]protocol.Value{}
 		}
-		wanted = append(wanted, wantedEntry{ID: inst.ID, Path: paths[inst.ID], Class: inst.Class, Props: props})
+		wanted = append(wanted, wantedEntry{ID: id, Path: path, Class: inst.Class, Props: props})
+		for _, child := range tr.Children(id) {
+			visit(child, path)
+		}
 	}
+	for _, root := range roots {
+		visit(root, nil)
+	}
+	if result.Instances != len(wanted) {
+		t.Errorf("Instances = %d, want %d", result.Instances, len(wanted))
+	}
+
 	wantedJSON, err := json.Marshal(wanted)
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantedPath := filepath.Join(dir, "wanted.json")
+	wantedPath := filepath.Join(t.TempDir(), "wanted.json")
 	if err := os.WriteFile(wantedPath, wantedJSON, 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	values, err := filepath.Abs(filepath.Join("..", "..", "..", "plugin", "src", "Values.luau"))
+	values, err := filepath.Abs(filepath.Join("..", "..", "..", "plugin", "src", "Verde", "Values.luau"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(lune, "run", filepath.Join("testdata", "read_place.luau"), values, place, wantedPath)
+	cmd := exec.Command(lune, "run", filepath.Join("testdata", "read_place.luau"), values, file, wantedPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("lune: %v\n%s", err, output)
 	}
 
-	var got []struct {
-		ID    protocol.Ref              `json:"id"`
-		Class string                    `json:"class"`
-		Props map[string]protocol.Value `json:"props"`
+	var got struct {
+		Top       int `json:"top"`
+		Instances []struct {
+			ID    protocol.Ref              `json:"id"`
+			Class string                    `json:"class"`
+			Props map[string]protocol.Value `json:"props"`
+		} `json:"instances"`
 	}
 	if err := json.Unmarshal(output, &got); err != nil {
 		t.Fatalf("lune's output isn't JSON: %v\n%s", err, output)
 	}
-	if len(got) != len(wanted) {
-		t.Fatalf("read %d instances, want %d", len(got), len(wanted))
+	if got.Top != len(roots) {
+		t.Errorf("the file has %d instances at the top, want %d", got.Top, len(roots))
 	}
-	for _, read := range got {
+	if len(got.Instances) != len(wanted) {
+		t.Fatalf("read %d instances, want %d", len(got.Instances), len(wanted))
+	}
+	for _, read := range got.Instances {
 		want := expected[read.ID]
 		if read.Class != want.Class {
 			t.Errorf("%s: class = %s, want %s", want.Name, read.Class, want.Class)
@@ -434,6 +469,112 @@ func TestLuneReadsWhatWasBuilt(t *testing.T) {
 			if err := sameValue(value, read.Props[name]); err != nil {
 				t.Errorf("%s.%s: %v", want.Name, name, err)
 			}
+		}
+	}
+}
+
+// modelTree is a small game with the awkward cases for choosing what a model holds.
+func modelTree(t *testing.T) (*tree.Tree, []protocol.Mount) {
+	t.Helper()
+	tr := newTree(t,
+		protocol.Instance{ID: "ws", Name: "Workspace", Class: "Workspace"},
+		protocol.Instance{ID: "car", Parent: "ws", Name: "Car", Class: "Model", Props: map[string]protocol.Value{
+			"PrimaryPart": wire("Ref", "wheel"),
+		}},
+		protocol.Instance{ID: "wheel", Parent: "car", Name: "Wheel", Class: "Part"},
+		protocol.Instance{ID: "link", Parent: "car", Name: "Link", Class: "ObjectValue", Props: map[string]protocol.Value{
+			"Value": wire("Ref", "other"),
+		}},
+		protocol.Instance{ID: "other", Parent: "ws", Name: "Other", Class: "Part"},
+		protocol.Instance{ID: "twin1", Parent: "ws", Name: "Twin", Class: "Part"},
+		protocol.Instance{ID: "twin2", Parent: "ws", Name: "Twin", Class: "Model"},
+		protocol.Instance{ID: "slash", Parent: "ws", Name: "A/B", Class: "Part"},
+	)
+	return tr, []protocol.Mount{{ID: "game", Path: []string{}}, {ID: "ws", Path: []string{"Workspace"}, Sync: true}}
+}
+
+func TestModelHoldsOnlyItsInstance(t *testing.T) {
+	tr, _ := modelTree(t)
+	var out bytes.Buffer
+	result, err := WriteModel(&out, tr, "car")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+
+	for _, want := range []string{`<Meta name="ExplicitAutoJoints">true</Meta>`, `<string name="Name">Car</string>`, `<string name="Name">Wheel</string>`} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %s in:\n%s", want, text)
+		}
+	}
+	for _, unwanted := range []string{`class="Workspace"`, `<string name="Name">Other</string>`} {
+		if strings.Contains(text, unwanted) {
+			t.Errorf("shouldn't have %s in:\n%s", unwanted, text)
+		}
+	}
+	if result.Instances != 3 {
+		t.Errorf("Instances = %d, want 3", result.Instances)
+	}
+
+	// PrimaryPart stays inside the model, and Link's target doesn't.
+	match := regexp.MustCompile(`<Ref name="PrimaryPart">(RBX[0-9A-F]+)</Ref>`).FindStringSubmatch(text)
+	if match == nil || !strings.Contains(text, `<Item class="Part" referent="`+match[1]+`">`) {
+		t.Errorf("PrimaryPart doesn't point at Wheel:\n%s", text)
+	}
+	if strings.Contains(text, `name="Value"`) {
+		t.Errorf("wrote a Ref to something outside the model:\n%s", text)
+	}
+	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "Workspace/Car/Link") {
+		t.Errorf("warnings = %q, want one naming Workspace/Car/Link", result.Warnings)
+	}
+}
+
+func TestPlacesHaveNoMeta(t *testing.T) {
+	tr, _ := modelTree(t)
+	if out, _ := build(t, tr); strings.Contains(out, "<Meta") {
+		t.Errorf("Roblox doesn't write Meta for places:\n%s", out)
+	}
+}
+
+func TestChoosingWhatAModelHolds(t *testing.T) {
+	tr, mounts := modelTree(t)
+	dir := t.TempDir()
+
+	works := map[string]string{
+		"Workspace/Car":       `<string name="Name">Car</string>`,
+		"Workspace/Car/Wheel": `<string name="Name">Wheel</string>`,
+		"Workspace/A/B":       `<string name="Name">A/B</string>`,
+	}
+	for instance, want := range works {
+		path := filepath.Join(dir, "out.rbxmx")
+		if _, err := WriteFile(path, tr, mounts, instance); err != nil {
+			t.Errorf("%s: %v", instance, err)
+			continue
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), want) {
+			t.Errorf("%s: missing %s in:\n%s", instance, want, data)
+		}
+	}
+
+	fails := []struct{ output, instance, want string }{
+		{"a.rbxmx", "", "needs an instance"},
+		{"a.rbxmx", "Workspace/Nope", "nothing is at"},
+		{"a.rbxmx", "Workspace/Twin", "2 instances"},
+		{"a.rbxmx", "Workspace", "already exists in every game"},
+		{"a.rbxlx", "Workspace/Car", "only works for .rbxmx"},
+		{"a.rbxm", "Workspace/Car", "binary"},
+	}
+	for _, test := range fails {
+		_, err := WriteFile(filepath.Join(dir, test.output), tr, mounts, test.instance)
+		if err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Errorf("%s with %q: err = %v, want one with %q", test.output, test.instance, err, test.want)
+		}
+		if _, statErr := os.Stat(filepath.Join(dir, test.output)); statErr == nil {
+			t.Errorf("%s with %q wrote a file", test.output, test.instance)
 		}
 	}
 }

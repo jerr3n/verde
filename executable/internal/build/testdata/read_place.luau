@@ -1,12 +1,13 @@
 --[[
-	Reads a built place the way a real reader would, and prints each instance's properties
-	as wire values, using the plugin's own Values module. build_test.go compares those with
-	what went in.
+	Reads a built place or model the way a real reader would, and prints each instance's
+	properties as wire values, using the plugin's own Values module. build_test.go compares
+	those with what went in.
 
-		lune run read_place.luau <Values.luau> <place.rbxlx> <wanted.json>
+		lune run read_place.luau <Values.luau> <place.rbxlx or model.rbxmx> <wanted.json>
 
 	wanted.json is a list of { id, path, class, props }. It says what to look at, since most
-	properties in a place are defaults that were never written.
+	properties in a file are defaults that were never written. Paths start from the top of the
+	file. Everything in it is checked to be there, and a count of what's at the top is printed.
 ]]
 
 local fs = require("@lune/fs")
@@ -29,7 +30,16 @@ environment.game = {
 }
 local Values = luau.load(fs.readFile(valuesPath), { debugName = "Values", environment = environment })()
 
-local game = roblox.deserializePlace(fs.readFile(placePath))
+local game
+if string.sub(placePath, -6) == ".rbxmx" then
+	-- A model is a list of instances, so they're put under something to walk them the same way.
+	game = roblox.Instance.new("Folder")
+	for _, instance in roblox.deserializeModel(fs.readFile(placePath)) do
+		instance.Parent = game
+	end
+else
+	game = roblox.deserializePlace(fs.readFile(placePath))
+end
 
 local function find(path: { string }): any
 	local current = game
@@ -98,4 +108,4 @@ for _, entry in wanted do
 	table.insert(results, { id = entry.id, class = instance.ClassName, props = props })
 end
 
-print(serde.encode("json", results))
+print(serde.encode("json", { top = #game:GetChildren(), instances = results }))

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 package config
 
 import (
@@ -10,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.yaml.in/yaml/v4"
 )
@@ -92,6 +95,13 @@ type Cfg struct {
 	Conflicts struct {
 		OnConnect OnConnect `yaml:"onConnect"`
 	} `yaml:"conflicts"`
+}
+
+type Hook struct {
+	Name    string        `yaml:"name"`
+	Match   []string      `yaml:"match"`
+	Run     []string      `yaml:"run"`
+	Timeout time.Duration `yaml:"timeout"`
 }
 
 // Addr returns the host:port the server should listen on.

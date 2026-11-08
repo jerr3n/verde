@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: MPL-2.0
+
 --[[
 	Converts Roblox values to and from the wire format { t = type, v = value }.
 	PROTOCOL.md lists every type.

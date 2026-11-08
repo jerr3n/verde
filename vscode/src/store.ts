@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 import { Instance, Mount, Patch, Ref, SCRIPT_CLASSES, Snapshot } from "./protocol";
 
 // The extension's copy of the server's tree, built from a snapshot and kept current by patches.

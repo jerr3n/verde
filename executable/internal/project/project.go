@@ -1,20 +1,5 @@
-// Package project reads a Verde project from disk into an instance tree.
-//
-// Files map to instances like this:
-//
-//	Main.server.luau         Script
-//	Input.client.luau        LocalScript
-//	Util.luau                ModuleScript
-//	lib/                     Folder
-//	Shop/init.server.luau    Shop, as a Script whose children are the rest of Shop/
-//	Lamp.Part.inst.json      Lamp, as a Part with the properties in the file
-//	Car/init.Model.inst.json  Car, as a Model whose children are the rest of Car/
-//	Main.Script.inst.json    Main.server.luau's properties other than Source
-//	lib/init.Folder.inst.json  lib's properties, if it has any
-//	Part~3f9a1c2e7b04.Part.inst.json  a second Part called Part, with its name inside
-//
-// Other files are skipped. Names that aren't safe as file names are percent-encoded
-// (see encodeName). Load reads this mapping from disk, and Apply writes it.
+// SPDX-License-Identifier: MPL-2.0
+
 package project
 
 import (

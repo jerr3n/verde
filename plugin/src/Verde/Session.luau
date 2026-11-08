@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: MPL-2.0
+
 --[[
 	One connection attempt's lifecycle: connect, say hello, apply the snapshot, then
 	exchange patches until the connection ends.

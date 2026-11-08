@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 // Command genreflection writes reflection.json, the part of rbx-dom's reflection database
 // that a place file needs: what each property is saved as, and each enum's numbers.
 // Run it with `go generate ./internal/build` to pick up new Roblox classes.

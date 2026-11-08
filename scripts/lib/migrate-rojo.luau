@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: MPL-2.0
+
 -- Converts a resolved Rojo place to Verde's on-disk format. The command wrapper
 -- builds with Rojo first, so Rojo remains responsible for its project semantics.
 local fs = require("@lune/fs")

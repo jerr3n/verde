@@ -1,4 +1,5 @@
-// Package logging provides a zap logging and Gin middleware that log through it.
+// SPDX-License-Identifier: MPL-2.0
+
 package logging
 
 import (

@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: MPL-2.0
+
 --[[
 	Tests the plugin's logic against a fake Studio. Run from plugin/ with:
 

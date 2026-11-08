@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: MPL-2.0
+
 -- Runs the real UI with Roblox property validation and small event/plugin fakes.
 -- Lune does not render layouts; resizing and text wrapping still need Studio QA.
 local fs = require("@lune/fs")

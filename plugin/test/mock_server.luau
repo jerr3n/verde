@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: MPL-2.0
+
 --[[
 	A stand-in for the Verde backend, for trying the plugin in Studio before the
 	real one exists. It speaks PROTOCOL.md with a fixed snapshot and prints whatever

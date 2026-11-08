@@ -26,6 +26,11 @@ sync:
 ignore:
   paths: ["**/*.tmp", "**/.DS_Store"]
   instances: ["Workspace/Camera", "Workspace/Terrain"]
-  
+#hooks:
+#  - name: format
+#    match: ["**/*.luau"]
+#    run: ["stylua"]
+#    timeout: 1
+
 conflicts:
   onConnect: disk # disk | studio | interactive | bidirectional

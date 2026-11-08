@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 import { randomBytes } from "node:crypto";
 import * as vscode from "vscode";
 import { LiveProject } from "./live";

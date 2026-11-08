@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 // `verde serve` logs one JSON object per line with GIN_MODE=release. Anything else, like the
 // "error: ..." it prints when it exits, comes through as plain text.
 

@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: MPL-2.0
+
 --[[
 	A WebSocket to the Verde server. Callbacks fire at most once for onClosed, and
 	never after close is called.

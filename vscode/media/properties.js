@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 // Draws the panel state from src/panel.ts and reports edits. Everything is set through
 // textContent and value, because names and values come from project files.
 (function () {

@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: MPL-2.0
+
 --[[
 	Pop-ups in the corner of the 3D view. They live in CoreGui so they show with the
 	panel closed. Studio only draws CoreGui over the 3D view, so they aren't visible

@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: MPL-2.0
+
 --[[
 	Plugin entry point. PROTOCOL.md describes what the server has to do, and
 	README.md describes how the plugin works.

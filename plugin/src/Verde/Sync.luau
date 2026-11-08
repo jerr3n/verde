@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: MPL-2.0
+
 --[[
 	Keeps the instances inside the sync mounts in step with the server.
 

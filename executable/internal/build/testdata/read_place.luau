@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: MPL-2.0
+
 --[[
 	Reads a built place or model the way a real reader would, and prints each instance's
 	properties as wire values, using the plugin's own Values module. build_test.go compares

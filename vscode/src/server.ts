@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 import { ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";

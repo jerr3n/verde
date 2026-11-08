@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 import * as vscode from "vscode";
 import { Instance, Ref, SCRIPT_CLASSES } from "./protocol";
 import { InstanceStore } from "./store";

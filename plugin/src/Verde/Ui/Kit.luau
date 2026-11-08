@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: MPL-2.0
+
 --[[
 	The small set of building blocks the panel and the pop-ups share.
 ]]

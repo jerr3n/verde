@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 // Package build writes a project's instances as a Roblox place or model file.
 //
 // It writes the XML formats (.rbxlx and .rbxmx), which https://dom.rojo.space/xml documents.

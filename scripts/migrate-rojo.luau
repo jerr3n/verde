@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: MPL-2.0
+
 -- Run with: lune run scripts/migrate-rojo.luau path/to/default.project.json
 local fs = require("@lune/fs")
 local process = require("@lune/process")

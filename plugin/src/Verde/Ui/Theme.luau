@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: MPL-2.0
+
 --[[
 	Colors that follow Studio's theme. Anything bound here repaints when the theme
 	changes. Short-lived UI, such as a pop-up, binds to a scope and destroys it

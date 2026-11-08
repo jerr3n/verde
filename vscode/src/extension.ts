@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 import { execFile } from "node:child_process";
 import * as path from "node:path";
 import * as vscode from "vscode";

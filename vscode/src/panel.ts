@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 import { Ref, Value } from "./protocol";
 import { InstanceStore } from "./store";
 import { describe, Editor } from "./values";

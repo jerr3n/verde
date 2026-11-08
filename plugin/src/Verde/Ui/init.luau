@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: MPL-2.0
+
 --[[
 	The Studio dock widget, with Sync, Activity and Settings tabs. Each page scrolls
 	on its own, so small docks keep the top bar in view.

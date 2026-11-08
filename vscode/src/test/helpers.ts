@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";

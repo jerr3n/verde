@@ -1,19 +1,5 @@
-// Package tree holds Verde's in-memory copy of the instances being synced.
-//
-// It mirrors the shape of the game in Studio:
-//
-//	game
-//	└── ReplicatedStorage
-//	    └── lib
-//	        └── Hello
-//
-// Everything is stored in one map, keyed by Ref, so any instance can be found
-// directly without walking down from the root. Each instance also records its
-// parent, and each node records its children, so the tree can be walked both ways.
-// The methods here keep those two records in agreement.
-//
-// A Tree isn't safe for concurrent use. One goroutine should own it, and everything
-// else should ask that goroutine to make changes.
+// SPDX-License-Identifier: MPL-2.0
+
 package tree
 
 import (

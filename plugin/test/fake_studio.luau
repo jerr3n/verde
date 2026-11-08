@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: MPL-2.0
+
 --[[
 	A small fake of Studio for testing the plugin's modules in Lune. Each call to
 	new() builds a separate world and loads fresh copies of the modules into it.

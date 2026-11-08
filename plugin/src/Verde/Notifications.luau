@@ -1,3 +1,5 @@
+-- SPDX-License-Identifier: MPL-2.0
+
 --[[
 	The activity history behind the panel's feed and its unread badge. It holds no
 	instances, so what gets recorded can be tested without any UI.

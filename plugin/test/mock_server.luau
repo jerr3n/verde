@@ -2,7 +2,7 @@
 
 --[[
 	A stand-in for the Verde backend, for trying the plugin in Studio before the
-	real one exists. It speaks PROTOCOL.md with a fixed snapshot and prints whatever
+	real one exists. It speaks the server's protocol with a fixed snapshot and prints whatever
 	the plugin sends. Run from plugin/ with:
 
 		lune run test/mock_server.luau [port]

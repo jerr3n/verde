@@ -39,8 +39,7 @@ const (
 	// the plugin asks the user first, because those files would be deleted.
 	OnConnectStudio OnConnect = "studio"
 	// OnConnectInteractive makes the plugin ask the user when disk and Studio are different.
-	OnConnectInteractive   OnConnect = "interactive"
-	OnConnectBidirectional OnConnect = "bidirectional"
+	OnConnectInteractive OnConnect = "interactive"
 )
 
 // SyncInstance connects one instance in the game to one folder on disk.

@@ -5,7 +5,7 @@
 
 		lune run test/run
 
-	This can't catch wrong assumptions about real Studio behavior. README.md lists
+	This can't catch wrong assumptions about real Studio behavior. The README at the repo root lists
 	what still has to be checked in Studio itself.
 ]]
 
@@ -1091,7 +1091,7 @@ test("a snapshot without mounts fails clearly", function()
 	t.receive("snapshot", { root = "game", instances = {} })
 	t.session:tick(os.clock())
 	eq(t.lastStatus().status, "disconnected", "status")
-	check(string.find(t.lastStatus().detail, "PROTOCOL", 1, true), "should point at the docs")
+	check(string.find(t.lastStatus().detail, "same version", 1, true), "should suggest checking versions")
 end)
 
 test("no reply is reported, such as when the server just echoes", function()

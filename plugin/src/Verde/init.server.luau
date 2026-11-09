@@ -1,8 +1,7 @@
 -- SPDX-License-Identifier: MPL-2.0
 
 --[[
-	Plugin entry point. PROTOCOL.md describes what the server has to do, and
-	README.md describes how the plugin works.
+	Plugin entry point. The README at the repo root describes how the plugin works.
 ]]
 
 local RunService = game:GetService("RunService")

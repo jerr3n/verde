@@ -58,10 +58,6 @@ func serve(ctx context.Context, logger *zap.Logger, cfg *config.Cfg) error {
 			handleWs(c)
 			return
 		}
-
-		c.JSON(200, gin.H{
-			"message": "Hello over HTTP!",
-		})
 	})
 
 	r.GET("/ws", handleWs)
@@ -78,7 +74,8 @@ func main() {
 	defer logger.Sync()
 	var cmd = &cli.Command{
 		Name:                  "verde",
-		Description:           "multi-directional sync between roblox",
+		Description:           "Multi-directional sync between Roblox and Disk.",
+		Usage:                 "Multi-directional sync between Roblox and Disk.",
 		EnableShellCompletion: true,
 		Commands: []*cli.Command{
 			{

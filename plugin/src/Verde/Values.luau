@@ -2,7 +2,6 @@
 
 --[[
 	Converts Roblox values to and from the wire format { t = type, v = value }.
-	PROTOCOL.md lists every type.
 ]]
 
 local HttpService = game:GetService("HttpService")

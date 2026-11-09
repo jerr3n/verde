@@ -272,7 +272,7 @@ end
 
 function Session:_handleSnapshot(snapshot: any)
 	if type(snapshot) ~= "table" or type(snapshot.mounts) ~= "table" or type(snapshot.instances) ~= "table" then
-		self:_fail("The server's snapshot has no mounts. See plugin/PROTOCOL.md.")
+		self:_fail("The server's snapshot has no mounts. Check that the server and plugin are the same version.")
 		return
 	end
 

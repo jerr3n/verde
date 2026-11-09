@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
-// The wire protocol. plugin/PROTOCOL.md is the reference.
+// The wire protocol. It mirrors executable/internal/protocol/protocol.go.
 
 export type Ref = string;
 

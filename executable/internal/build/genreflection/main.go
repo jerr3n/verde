@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MPL-2.0
 
-// Command genreflection writes reflection.json, the part of rbx-dom's reflection database
-// that a place file needs: what each property is saved as, and each enum's numbers.
-// Run it with `go generate ./internal/build` to pick up new Roblox classes.
+// Command genreflection writes reflection.json. This file is the part of the rbx-dom reflection database that a place file needs:
+//   - The saved name and type of each property.
+//   - The numbers of each enum.
+//
+// To get new Roblox classes, run `go generate ./internal/build`.
 package main
 
 import (
@@ -41,7 +43,7 @@ type rawProp struct {
 	} `json:"DataType"`
 	Kind struct {
 		Canonical *struct {
-			// "Serializes", "DoesNotSerialize", {"SerializesAs": name} or {"Migrate": ...}
+			// Serialization is "Serializes", "DoesNotSerialize", {"SerializesAs": name}, or {"Migrate": ...}.
 			Serialization json.RawMessage `json:"Serialization"`
 		} `json:"Canonical"`
 		Alias *struct {
@@ -56,7 +58,8 @@ type class struct {
 }
 
 type prop struct {
-	As   string `json:"as,omitempty"` // the name it's saved under, if that's not its own
+	// As is the saved name of the property. As is empty if the saved name is the same as the property name.
+	As   string `json:"as,omitempty"`
 	Type string `json:"type"`
 }
 
@@ -103,7 +106,7 @@ func download(url string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// find looks for a property on a class and then on what it inherits from.
+// find looks for a property on a class, and then on each superclass.
 func find(db rawDatabase, className, name string) (rawProp, bool) {
 	for className != "" {
 		c, ok := db.Classes[className]
@@ -118,10 +121,10 @@ func find(db rawDatabase, className, name string) (rawProp, bool) {
 	return rawProp{}, false
 }
 
-// saved works out what a property is written as. ok is false if Roblox doesn't save it.
+// saved returns the saved name and type of a property. ok is false if Roblox does not save the property.
 //
-// A migrated property is written under its own name, because Roblox still reads old files
-// and turns it into the new property, like Decal.Texture into TextureContent.
+// A migrated property keeps its own name. Roblox still reads old files and changes the old property into the new property.
+// An example is Decal.Texture, which becomes TextureContent.
 func saved(db rawDatabase, className, name string) (prop, bool, error) {
 	p, ok := find(db, className, name)
 	if !ok {
@@ -165,7 +168,7 @@ func saved(db rawDatabase, className, name string) (prop, bool, error) {
 	return out, true, nil
 }
 
-// convert writes one class or enum to a line, sorted, so an update is a readable diff.
+// convert writes each class or enum on one line, in sorted order. Thus an update gives a diff that is easy to read.
 func convert(db rawDatabase) ([]byte, error) {
 	var out bytes.Buffer
 	version := make([]string, len(db.Version))

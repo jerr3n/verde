@@ -13,8 +13,9 @@ import (
 //go:embed reflection.json
 var reflectionJSON []byte
 
-// reflection says what the wire format doesn't: a Number could be a float, double or int,
-// and Size is saved as size.
+// reflection holds the data that the wire format does not give.
+// For example, a Number can be a float, a double, or an int, and Size is saved as size.
+// genreflection makes reflection.json from the rbx-dom database.
 type reflection struct {
 	Version string                      `json:"version"`
 	Classes map[string]reflectedClass   `json:"classes"`
@@ -27,20 +28,23 @@ type reflectedClass struct {
 }
 
 type reflectedProp struct {
-	As   string `json:"as"` // the name it's saved under, if that's not its own
+	// As is the saved name of the property. As is empty if the saved name is the same as the property name.
+	As   string `json:"as"`
 	Type string `json:"type"`
 }
 
+// database decodes reflection.json one time, on the first call.
 var database = sync.OnceValue(func() *reflection {
 	var db reflection
 	if err := json.Unmarshal(reflectionJSON, &db); err != nil {
-		panic("build: reflection.json: " + err.Error()) // it's part of the executable
+		// reflection.json is part of the executable, so an error here is a bug.
+		panic("build: reflection.json: " + err.Error())
 	}
 	return &db
 })
 
-// savedAs returns the name and type a property is written with. ok is false for a property
-// Roblox doesn't save, or one the database doesn't know.
+// savedAs returns the saved name and the type of a property. It also checks the superclasses of class.
+// ok is false if Roblox does not save the property, or if the database does not know it.
 func (r *reflection) savedAs(class, name string) (saved, dataType string, ok bool) {
 	for class != "" {
 		c, known := r.Classes[class]

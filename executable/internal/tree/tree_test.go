@@ -35,7 +35,7 @@ func newTestTree(t *testing.T) *Tree {
 	return tr
 }
 
-// refs lists the tree's Refs in the order All returns them.
+// refs lists the refs of the tree in the order that All gives.
 func refs(tr *Tree) []Ref {
 	var out []Ref
 	for _, inst := range tr.All() {
@@ -176,7 +176,7 @@ func TestMove(t *testing.T) {
 	if err := tr.Update(protocol.Update{ID: "b", Parent: "c"}); err != nil {
 		t.Fatal(err)
 	}
-	// The whole subtree moves, and a is left with no children.
+	// The full subtree moves, and a has no children after the move.
 	assertRefs(t, tr, "game", "rs", "a", "c", "b", "s")
 
 	inst, _ := tr.Get("b")
@@ -264,7 +264,7 @@ func TestRemoveDeletesSubtree(t *testing.T) {
 	}
 }
 
-// The plugin can list a child after its parent, or the same Ref twice.
+// The plugin can list a child after its parent, or the same ref two times. Remove must accept both.
 func TestRemoveUnknownIsNoOp(t *testing.T) {
 	tr := newTestTree(t)
 	for _, id := range []Ref{"a", "a", "s", "never-existed"} {
@@ -285,7 +285,7 @@ func TestRemoveChildThenParent(t *testing.T) {
 	assertRefs(t, tr, "game", "rs", "c")
 }
 
-// Removing an instance frees its Ref, so the same Ref can be inserted again.
+// Remove frees the ref of an instance. Thus Insert can use the same ref again.
 func TestInsertAfterRemove(t *testing.T) {
 	tr := newTestTree(t)
 	if err := tr.Remove("c"); err != nil {

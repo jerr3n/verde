@@ -21,11 +21,11 @@ import (
 	"go.uber.org/zap"
 )
 
-// quietPeriod is longer than the watcher's debounce plus a rescan, so a message that
-// hasn't arrived after this isn't coming.
+// quietPeriod is longer than the debounce of the watcher plus a rescan.
+// Thus if a message does not arrive in this time, it does not come.
 const quietPeriod = 500 * time.Millisecond
 
-// server runs the real session and watcher against a temporary project.
+// server runs the real session and the real watcher on a temporary project.
 type server struct {
 	t   *testing.T
 	cfg *config.Cfg
@@ -76,7 +76,7 @@ func startServer(t *testing.T, files map[string]string) *server {
 	return &server{t, cfg, "ws" + strings.TrimPrefix(httpServer.URL, "http")}
 }
 
-// plugin is a test client that speaks the protocol the way the Studio plugin does.
+// plugin is a test client that uses the protocol in the same way as the Studio plugin.
 type plugin struct {
 	t        *testing.T
 	conn     *websocket.Conn
@@ -95,7 +95,7 @@ func (s *server) connectEditor() *plugin {
 	return s.say(protocol.Hello{ProtocolVersion: protocolVersion, Role: protocol.RoleEditor})
 }
 
-// say connects and sends hello, which has to be answered with a snapshot.
+// say connects and sends hello. The server must reply with a snapshot.
 func (s *server) say(hello protocol.Hello) *plugin {
 	s.t.Helper()
 	conn, _, err := websocket.Dial(context.Background(), s.url, nil)
@@ -184,7 +184,7 @@ func (p *plugin) assertQuiet() {
 	}
 }
 
-// ref finds a snapshot instance by name.
+// ref returns the ref of the snapshot instance with the given name.
 func (p *plugin) ref(name string) protocol.Ref {
 	p.t.Helper()
 	for _, inst := range p.snapshot.Instances {
@@ -292,7 +292,8 @@ func TestDiskEditStillReachesPluginsAfterPatch(t *testing.T) {
 }
 
 func TestFolderMadeByStudioIsWatched(t *testing.T) {
-	s := startServer(t, nil) // no src folder at all
+	// The project has no src folder.
+	s := startServer(t, nil)
 	studio := s.connect()
 
 	studio.send("patch", protocol.Patch{Added: []protocol.Instance{
@@ -355,7 +356,7 @@ func TestEditingPartFileReachesPlugin(t *testing.T) {
 	lamp := p.ref("Lamp")
 	full := filepath.Join(s.cfg.Root, "src/Lamp.Part.inst.json")
 
-	// only a change in meaning should reach studio
+	// Only a change in the value must go to Studio. A change in the format must not.
 	if err := os.WriteFile(full, []byte(`{"props":{"Anchored":{"v":true,"t":"Bool"}}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +370,7 @@ func TestEditingPartFileReachesPlugin(t *testing.T) {
 		t.Errorf("patch = %+v", got)
 	}
 
-	// a half-saved file keeps the current tree, instead of deleting the part from studio
+	// A file that is only half saved keeps the current tree. The part must not be deleted from Studio.
 	if err := os.WriteFile(full, []byte(`{"props":`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -455,7 +456,8 @@ func TestEditorIsToldWhichPluginsAreConnected(t *testing.T) {
 
 	other := s.connectEditor()
 	other.nextStatus()
-	editor.assertQuiet() // an editor isn't a Studio
+	// An editor is not a Studio plugin, so the count does not change.
+	editor.assertQuiet()
 
 	studio := s.connect()
 	if got := editor.nextStatus(); got.Plugins != 1 {
@@ -480,7 +482,8 @@ func TestEditorIsNotLimitedByPlaceIds(t *testing.T) {
 	s := startServer(t, map[string]string{"src/Main.luau": "a"})
 	s.cfg.Serve.PlaceIds = []int64{42}
 
-	s.connectEditor() // fails the test if it's refused
+	// connectEditor fails the test if the server refuses the editor.
+	s.connectEditor()
 
 	conn, _, err := websocket.Dial(context.Background(), s.url, nil)
 	if err != nil {
@@ -519,7 +522,8 @@ func TestEditorPatchReachesDiskAndStudio(t *testing.T) {
 		t.Errorf("Studio got %+v", got)
 	}
 	s.waitForFile("src/Lamp.Part.inst.json", "{\n  \"props\": {\n    \"Anchored\": {\"t\":\"Bool\",\"v\":true}\n  }\n}\n")
-	editor.assertQuiet() // the sender already has its own change
+	// The sender already has its own change, so it gets nothing.
+	editor.assertQuiet()
 }
 
 func TestLocate(t *testing.T) {

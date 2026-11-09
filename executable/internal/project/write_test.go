@@ -15,7 +15,7 @@ import (
 	"github.com/jerr3n/verde/executable/internal/tree"
 )
 
-// fixture is a loaded project that patches can be applied to, as the session does.
+// fixture is a loaded project. A test applies patches to it, as the session does.
 type fixture struct {
 	t      *testing.T
 	cfg    *config.Cfg
@@ -33,7 +33,7 @@ func newFixture(t *testing.T, files map[string]string, yml string) *fixture {
 	return &fixture{t, cfg, tr, mounts}
 }
 
-// ref finds an instance's Ref by path, like "game/W/Main".
+// ref returns the ref of the instance at full, for example "game/W/Main".
 func (f *fixture) ref(full string) protocol.Ref {
 	f.t.Helper()
 	inst, ok := byPath(f.tree)[full]
@@ -43,8 +43,8 @@ func (f *fixture) ref(full string) protocol.Ref {
 	return inst.ID
 }
 
-// apply applies a patch that should cause no errors, then checks the rule the whole
-// feature rests on: scanning what was just written must find nothing to send back.
+// apply applies a patch that must cause no errors. Then it checks the most important rule:
+// a scan of the files that apply wrote must find nothing to send back.
 func (f *fixture) apply(p protocol.Patch) protocol.Patch {
 	f.t.Helper()
 	applied, errs := Apply(f.cfg, f.tree, f.mounts, p)
@@ -85,7 +85,7 @@ func (f *fixture) assertMissing(name string) {
 	}
 }
 
-// files lists every file in the project except the config and the trash.
+// files lists each file in the project, but not the config and not the trash.
 func (f *fixture) files() []string {
 	var out []string
 	filepath.WalkDir(f.cfg.Root, func(full string, d os.DirEntry, err error) error {
@@ -105,7 +105,7 @@ func (f *fixture) files() []string {
 	return out
 }
 
-// trashed returns the text of every trashed file ending in suffix.
+// trashed returns the text of each file in the trash whose name ends with suffix.
 func (f *fixture) trashed(suffix string) []string {
 	var out []string
 	filepath.WalkDir(filepath.Join(f.cfg.Root, ".verde/trash"), func(full string, d os.DirEntry, err error) error {
@@ -153,7 +153,7 @@ func TestApplyCreatesMissingSyncFolder(t *testing.T) {
 
 func TestApplyWritesScriptWithoutSource(t *testing.T) {
 	f := newFixture(t, nil, syncW)
-	// apply fails if the next scan finds a Source the tree doesn't have.
+	// apply fails if the next scan finds a Source that the tree does not have.
 	f.apply(protocol.Patch{Added: []protocol.Instance{{ID: "a", Parent: f.ref("game/W"), Name: "Empty", Class: "ModuleScript"}}})
 	f.assertFile("s/Empty.luau", "")
 }
@@ -272,11 +272,11 @@ func TestApplyScriptBecomesFolderWhenItGetsAChild(t *testing.T) {
 	f.assertFile("s/Shop/init.server.luau", "shop")
 	f.assertFile("s/Shop/Item.luau", "item")
 
-	// Its Source now goes to the new place.
+	// Its Source now goes to the new location.
 	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: f.ref("game/W/Shop"), Props: srcProps("changed")}}})
 	f.assertFile("s/Shop/init.server.luau", "changed")
 
-	// It stays a folder without children, which is still a valid project.
+	// It stays a folder with no children. This is still a valid project.
 	f.apply(protocol.Patch{Removed: []protocol.Ref{"a"}})
 	f.assertFile("s/Shop/init.server.luau", "changed")
 }
@@ -302,7 +302,7 @@ func TestApplyScriptWontMergeWithFolderOfTheSameName(t *testing.T) {
 		script("kid", scriptRef, "Kid", "ModuleScript", "kid"),
 	}})
 
-	// the folder keeps its name, the script gets its own folder w/ its name inside
+	// The Folder keeps its name. The script gets its own folder, and its .inst.json file holds its name and its ref.
 	dir := "s/Foo" + tagFor(scriptRef)
 	f.assertFile("s/Foo/Bar.luau", "bar")
 	f.assertMissing("s/Foo/Kid.luau")
@@ -323,7 +323,7 @@ func TestApplyRemovesToTrash(t *testing.T) {
 	util := f.ref("game/W/lib/Util")
 	main := f.ref("game/W/Main")
 
-	// Listed like the plugin lists them: descendants too, children first.
+	// The list has the same form as the list from the plugin: it includes descendants, and children come first.
 	applied := f.apply(protocol.Patch{Removed: []protocol.Ref{two, util, sub, lib, main}})
 
 	f.assertMissing("s/lib")
@@ -369,7 +369,8 @@ func TestApplyDangerousNamesStayInsideAndRoundTrip(t *testing.T) {
 				}
 				added = append(added, inst)
 			}
-			f.apply(protocol.Patch{Added: added}) // fails if a name comes back differently
+			// apply fails if a scan gives a different name.
+			f.apply(protocol.Patch{Added: added})
 
 			next, _, err := Load(f.cfg)
 			if err != nil {
@@ -394,7 +395,7 @@ func TestApplyDangerousNamesStayInsideAndRoundTrip(t *testing.T) {
 }
 
 func TestApplyRenameExistingFileWithUnsafeName(t *testing.T) {
-	// Not something Verde would write, but valid on Linux, and it has to be found.
+	// Verde does not write this name, but the name is valid on Linux, and Verde must find the file.
 	f := newFixture(t, map[string]string{"s/What?.luau": "x"}, syncW)
 
 	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: f.ref("game/W/What?"), Props: srcProps("y")}}})
@@ -449,7 +450,7 @@ func TestApplyMoveIntoAndOutOfNonScript(t *testing.T) {
 	f.assertFile("s/Lamp/Main.luau", "main")
 	f.assertFile("s/Lamp/lib/Sub.luau", "sub")
 
-	// moving out leaves the part as a folder, like a script that once had children
+	// After the child moves out, the part stays a folder, as a script that had children does.
 	f.apply(protocol.Patch{Updated: []protocol.Update{
 		{ID: main, Parent: w},
 		{ID: lib, Parent: w},
@@ -473,7 +474,7 @@ func TestApplySameNameSiblings(t *testing.T) {
 	f.assertFile(second+".ModuleScript.inst.json", "{\n  \"id\": \"second\",\n  \"name\": \"Dup\"\n}\n")
 	f.assertFile("s/Dup.ModuleScript.inst.json", "{\n  \"id\": \"first\"\n}\n")
 
-	// editing one doesn't touch the other's file
+	// An edit to one script does not change the file of the other script.
 	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: "second", Props: srcProps("second2")}}})
 	f.assertFile("s/Dup.luau", "first")
 	f.assertFile(second+".luau", "second2")
@@ -481,8 +482,8 @@ func TestApplySameNameSiblings(t *testing.T) {
 	f.assertFile("s/Dup.luau", "first2")
 	f.assertFile(second+".luau", "second2")
 
-	// deleting the first leaves the second where it is, so its file doesn't change name in
-	// git because of something that happened to another instance
+	// A delete of the first script does not move the second script.
+	// Thus the file of the second script does not get a new name in git because of a change to a different instance.
 	f.apply(protocol.Patch{Removed: []protocol.Ref{"first"}})
 	f.assertMissing("s/Dup.luau")
 	f.assertMissing("s/Dup.ModuleScript.inst.json")
@@ -493,7 +494,7 @@ func TestApplyNamesDifferingOnlyByCase(t *testing.T) {
 	f := newFixture(t, nil, syncW)
 	w := f.ref("game/W")
 
-	// they'd be the same file on windows and macos
+	// These names are the same file on Windows and macOS.
 	f.apply(protocol.Patch{Added: []protocol.Instance{
 		script("a", w, "Foo", "ModuleScript", "a"),
 		script("b", w, "foo", "ModuleScript", "b"),
@@ -516,8 +517,8 @@ func TestApplyDeleteThenAddSameNameInOnePatch(t *testing.T) {
 	f := newFixture(t, map[string]string{"s/Main.luau": "old"}, syncW)
 	old := f.ref("game/W/Main")
 
-	// The protocol applies added first, while the old one still has the name. That
-	// sorts itself out by the end of the patch, so apply also checks there's no error.
+	// The protocol applies Added first, when the old instance still has the name.
+	// The problem goes away before the end of the patch, so apply also checks that there is no error.
 	f.apply(protocol.Patch{
 		Added:   []protocol.Instance{script("new", f.ref("game/W"), "Main", "ModuleScript", "new")},
 		Removed: []protocol.Ref{old},
@@ -548,11 +549,12 @@ func TestApplyIgnoredPathStaysInTree(t *testing.T) {
 		{ID: "dir", Parent: w, Name: "cache.tmp", Class: "Folder"},
 		script("kid", "dir", "Kid", "ModuleScript", "kid"),
 	}})
-	if len(errs) != 1 { // only for the Folder: its child's reason is the same
+	// Only the Folder gives an error. The child has the same reason, so it gives no error.
+	if len(errs) != 1 {
 		t.Errorf("errs = %v, want one", errs)
 	}
 	f.assertMissing("s/cache.tmp")
-	// Without the fileless mark, the scan wouldn't find it and Studio would delete it.
+	// Without the fileless mark, the scan does not find the instance, and Studio deletes it.
 	f.assertNoEcho()
 }
 
@@ -664,10 +666,10 @@ func TestApplyFailedSourceWriteKeepsEdit(t *testing.T) {
 	if len(errs) != 1 {
 		t.Errorf("errs = %v, want one", errs)
 	}
-	// The file still says "old". A scan mustn't send that back over the user's edit.
+	// The file still holds "old". A scan must not send that text back over the edit from the user.
 	f.assertNoEcho()
 
-	// Later patches don't repeat the error.
+	// Later patches do not report the error again.
 	_, errs = Apply(f.cfg, f.tree, f.mounts, protocol.Patch{Updated: []protocol.Update{{ID: id, Props: srcProps("newer")}}})
 	if len(errs) != 0 {
 		t.Errorf("errs = %v, want none", errs)
@@ -676,7 +678,7 @@ func TestApplyFailedSourceWriteKeepsEdit(t *testing.T) {
 	if err := os.Chmod(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// Any patch retries, and the old text still gets a copy in the trash.
+	// Each patch tries the write again, and the old text still goes to the trash.
 	f.apply(protocol.Patch{})
 	f.assertFile("s/Main.luau", "newer")
 	if f.tree.IsFileless(id) {
@@ -704,7 +706,8 @@ func TestApplyFailedAddIsNotTakenAsDeletion(t *testing.T) {
 	if len(errs) != 1 {
 		t.Errorf("errs = %v, want one", errs)
 	}
-	f.assertNoEcho() // a Removed here would delete it from Studio
+	// A Removed entry here deletes the instance from Studio.
+	f.assertNoEcho()
 }
 
 func TestApplyFailedRenameKeepsOldPlace(t *testing.T) {
@@ -740,7 +743,7 @@ func TestApplyDoesntFollowSymlinkOutOfProject(t *testing.T) {
 		t.Skip(err)
 	}
 
-	// The scan doesn't follow it, so this can't resolve to the link either.
+	// The scan does not follow the symlink. Thus Apply must not write through the symlink either.
 	f.apply(protocol.Patch{Added: []protocol.Instance{
 		{ID: "dir", Parent: f.ref("game/W"), Name: "Evil", Class: "Folder"},
 		script("kid", "dir", "Kid", "ModuleScript", "x"),

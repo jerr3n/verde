@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
+// Package tree holds the server's copy of the synced instances, and finds the changes between two copies.
 package tree
 
 import (
@@ -11,9 +12,10 @@ import (
 	"github.com/jerr3n/verde/executable/internal/protocol"
 )
 
-// alias for protocol.Ref
+// Ref is the same type as protocol.Ref.
 type Ref = protocol.Ref
 
+// These errors tell why the Tree did not apply a change.
 var (
 	ErrEmptyRef      = errors.New("instance has no ref")
 	ErrNotFound      = errors.New("instance not found")
@@ -22,36 +24,40 @@ var (
 	ErrCycle         = errors.New("cannot move an instance into itself")
 )
 
-// one instance + children's refs
+// node is one instance and the refs of its children, in order.
 type node struct {
 	inst     protocol.Instance
 	children []Ref
-	fileless bool // should have a file but doesn't, so disk says nothing about it
+	// fileless is true when the instance must have a file on disk but has no file.
+	// See SetFileless.
+	fileless bool
 }
 
-// Tree is the set of synced instances. Create one with New.
+// Tree is the set of synced instances. Each instance has a unique Ref.
+// Make a Tree with New. A Tree is not safe for use by more than one goroutine at the same time.
 type Tree struct {
 	root  Ref
 	nodes map[Ref]*node
 }
 
-// creates  a tree containing only the root
+// New makes a tree that holds only root. New clears root.Parent.
 func New(root protocol.Instance) *Tree {
 	root = clone(root)
-	root.Parent = "" // The root is the one instance with no parent.
+	// The root is the only instance with no parent.
+	root.Parent = ""
 	return &Tree{
 		root:  root.ID,
 		nodes: map[Ref]*node{root.ID: {inst: root}},
 	}
 }
 
-// returns root
+// Root returns the ref of the root instance.
 func (t *Tree) Root() Ref { return t.root }
 
-// number of instances
+// Len returns the number of instances, including the root.
 func (t *Tree) Len() int { return len(t.nodes) }
 
-// finds one instance by its ref
+// Get returns a copy of the instance with the ref id. The bool is false if the tree has no such instance.
 func (t *Tree) Get(id Ref) (protocol.Instance, bool) {
 	n, ok := t.nodes[id]
 	if !ok {
@@ -60,7 +66,7 @@ func (t *Tree) Get(id Ref) (protocol.Instance, bool) {
 	return clone(n.inst), true
 }
 
-// lists an instance's children, in order
+// Children returns the refs of the children of id, in order. It returns nil if id is not in the tree.
 func (t *Tree) Children(id Ref) []Ref {
 	n, ok := t.nodes[id]
 	if !ok {
@@ -69,23 +75,24 @@ func (t *Tree) Children(id Ref) []Ref {
 	return slices.Clone(n.children)
 }
 
-// SetFileless records whether an instance is missing a file it would normally have, such
-// as one matching ignore.paths, or one whose write failed. Diff leaves these
-// alone: not finding the file doesn't mean it was deleted, and an older file with the
-// same name doesn't mean its contents changed.
+// SetFileless records whether an instance has no file on disk where it must have one.
+// Two examples are an instance whose path matches ignore.paths, and an instance whose file write failed.
+// Diff does not change or remove a fileless instance, for these reasons:
+//   - A missing file does not show that a person deleted the instance.
+//   - An older file with the same name does not show that the instance changed.
 func (t *Tree) SetFileless(id Ref, fileless bool) {
 	if n, ok := t.nodes[id]; ok {
 		n.fileless = fileless
 	}
 }
 
-// reports whether an instance is marked fileless
+// IsFileless reports whether id is in the tree and is fileless.
 func (t *Tree) IsFileless(id Ref) bool {
 	n, ok := t.nodes[id]
 	return ok && n.fileless
 }
 
-// lists every fileless instance, parents first
+// Fileless returns the ref of each fileless instance. A parent comes before its children.
 func (t *Tree) Fileless() []Ref {
 	var out []Ref
 	var visit func(id Ref)
@@ -102,7 +109,10 @@ func (t *Tree) Fileless() []Ref {
 	return out
 }
 
-// adds instance as last child of its parent
+// Insert adds a copy of inst as the last child of inst.Parent. Insert returns an error in these cases:
+//   - inst has no ref.
+//   - The ref is already in the tree.
+//   - The parent is not in the tree.
 func (t *Tree) Insert(inst protocol.Instance) error {
 	if inst.ID == "" {
 		return ErrEmptyRef
@@ -120,7 +130,10 @@ func (t *Tree) Insert(inst protocol.Instance) error {
 	return nil
 }
 
-// renames, moves, merges properties
+// Update applies u to the instance with the ref u.ID.
+// A non-empty Parent moves the instance. A non-empty Name renames it.
+// Each property in u.Props replaces the property with the same name. Other properties stay the same.
+// If the move fails, Update changes nothing.
 func (t *Tree) Update(u protocol.Update) error {
 	n, ok := t.nodes[u.ID]
 	if !ok {
@@ -130,8 +143,8 @@ func (t *Tree) Update(u protocol.Update) error {
 		return fmt.Errorf("update %s: %w", u.ID, ErrRootImmutable)
 	}
 
-	// Moving is the only step left that can fail, so it goes first. That way a
-	// failed move can't leave a rename half applied.
+	// The move is the only step after this point that can fail. Thus the move occurs first,
+	// and a failed move cannot leave the rename applied without the move.
 	if u.Parent != "" {
 		if err := t.move(n, u.Parent); err != nil {
 			return fmt.Errorf("update %s: %w", u.ID, err)
@@ -141,10 +154,11 @@ func (t *Tree) Update(u protocol.Update) error {
 		n.inst.Name = u.Name
 	}
 
-	// Merge rather than replace, because an update carries only what changed. A Nil
-	// value is stored like any other. Deleting it instead would drop it from later
-	// snapshots, and the plugin leaves properties missing from a snapshot untouched,
-	// so Studio could keep the old value after a reconnect.
+	// Merge the properties, because an update holds only the properties that changed.
+	// Keep a Nil value in the map. Do not delete the property.
+	// If the property is deleted, it is not in the next snapshot.
+	// The plugin does not change a property that is not in a snapshot.
+	// Thus Studio could keep the old value after a reconnect.
 	if len(u.Props) > 0 && n.inst.Props == nil {
 		n.inst.Props = make(map[string]protocol.Value, len(u.Props))
 	}
@@ -152,7 +166,8 @@ func (t *Tree) Update(u protocol.Update) error {
 	return nil
 }
 
-// deos move for update
+// move makes newParent the parent of n, and makes n the last child of newParent.
+// move returns ErrCycle if newParent is n or a descendant of n.
 func (t *Tree) move(n *node, newParent Ref) error {
 	id := n.inst.ID
 	if id == t.root {
@@ -166,8 +181,8 @@ func (t *Tree) move(n *node, newParent Ref) error {
 		return nil
 	}
 
-	// Walk up from the new parent to the root. Finding n on the way means n would
-	// end up inside itself, cutting that whole branch off from the root.
+	// Go up from the new parent to the root. If n is on that path, the move puts n inside itself.
+	// That move disconnects n and its descendants from the root.
 	for ancestor := newParent; ancestor != ""; ancestor = t.nodes[ancestor].inst.Parent {
 		if ancestor == id {
 			return ErrCycle
@@ -181,7 +196,8 @@ func (t *Tree) move(n *node, newParent Ref) error {
 	return nil
 }
 
-// deletes instance and everything underneath it
+// Remove deletes the instance id and all of its descendants.
+// Remove returns nil if id is not in the tree. Remove returns ErrRootImmutable for the root.
 func (t *Tree) Remove(id Ref) error {
 	if id == t.root {
 		return ErrRootImmutable
@@ -206,8 +222,8 @@ func (t *Tree) Remove(id Ref) error {
 	return nil
 }
 
-// applies a patch in protocol order: added, updated, then removed. It stops at the
-// first error, and anything before that stays applied
+// Apply applies p in this order: p.Added, then p.Updated, then p.Removed.
+// Apply stops at the first error. The changes before the error stay applied.
 func (t *Tree) Apply(p protocol.Patch) error {
 	for _, inst := range p.Added {
 		if err := t.Insert(inst); err != nil {
@@ -227,7 +243,7 @@ func (t *Tree) Apply(p protocol.Patch) error {
 	return nil
 }
 
-// lists copies of every instance
+// All returns a copy of each instance. A parent comes before its children, and siblings stay in order.
 func (t *Tree) All() []protocol.Instance {
 	out := make([]protocol.Instance, 0, len(t.nodes))
 
@@ -244,12 +260,12 @@ func (t *Tree) All() []protocol.Instance {
 	return out
 }
 
-// removes one ref from a slice
+// removeRef removes each copy of id from refs.
 func removeRef(refs []Ref, id Ref) []Ref {
 	return slices.DeleteFunc(refs, func(r Ref) bool { return r == id })
 }
 
-// copies instance + its propsmap
+// clone copies inst and its Props map, so that the copy and the original do not share the map.
 func clone(inst protocol.Instance) protocol.Instance {
 	inst.Props = maps.Clone(inst.Props)
 	return inst

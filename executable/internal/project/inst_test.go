@@ -24,7 +24,7 @@ func propsFile(lines ...string) string {
 	return "{\n  \"props\": {\n    " + strings.Join(lines, ",\n    ") + "\n  }\n}\n"
 }
 
-// loads the project again, like a new server would. only what's on disk survives this
+// restart loads the project again, as a new server does. Only the data on disk stays after a restart.
 func (f *fixture) restart() map[string]protocol.Instance {
 	f.t.Helper()
 	next, _, err := Load(f.cfg)
@@ -99,7 +99,7 @@ func TestLoadNonScripts(t *testing.T) {
 			t.Errorf("%s = %q, want %s", full, got[full].Class, class)
 		}
 	}
-	// game, W, and everything above. nothing else should've been read as an instance
+	// The count is game, W, and each entry in wantClass. Load must not read other files as instances.
 	if len(got) != len(wantClass)+2 {
 		t.Errorf("instances = %v", sortedPaths(got))
 	}
@@ -121,8 +121,7 @@ func TestLoadNonScripts(t *testing.T) {
 	}
 }
 
-// a bad file stops the load instead of being skipped, since a snapshot missing an instance
-// could make the plugin delete it
+// A bad file stops the load. Load does not skip it, because the plugin can delete an instance that is missing from a snapshot.
 func TestLoadRejectsBadInstFiles(t *testing.T) {
 	tests := map[string]map[string]string{
 		"invalid JSON":      {"s/Lamp.Part.inst.json": `{`},
@@ -174,7 +173,7 @@ func TestLoadIgnoresInstFiles(t *testing.T) {
 	}
 }
 
-// the point of all this: a part from studio is still there after a restart
+// This is the main goal: a part from Studio is still there after a restart.
 func TestPartsSurviveRestart(t *testing.T) {
 	f := newFixture(t, nil, syncW)
 	w := f.ref("game/W")
@@ -219,14 +218,14 @@ func TestApplyUpdatesPartFile(t *testing.T) {
 	}})
 	f.assertFile("s/Lamp.Part.inst.json", propsFile(`"Anchored": {"t":"Bool","v":true}`))
 
-	// an update merges, so the file has to hold both, sorted so diffs stay small
+	// An update merges the properties. Thus the file must hold both properties, in sorted order, so that diffs stay small.
 	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: "lamp", Props: boolProp("CanCollide", false)}}})
 	f.assertFile("s/Lamp.Part.inst.json", propsFile(`"Anchored": {"t":"Bool","v":true}`, `"CanCollide": {"t":"Bool","v":false}`))
 
 	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: "lamp", Props: boolProp("Anchored", false)}}})
 	f.assertFile("s/Lamp.Part.inst.json", propsFile(`"Anchored": {"t":"Bool","v":false}`, `"CanCollide": {"t":"Bool","v":false}`))
 
-	// a prop cleared in studio has to stay in the file, or a restart would lose it
+	// A property that Studio sets to Nil must stay in the file. If it does not stay, a restart loses the change.
 	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: "lamp", Props: map[string]protocol.Value{"CanCollide": {Type: "Nil"}}}}})
 	f.assertFile("s/Lamp.Part.inst.json", propsFile(`"Anchored": {"t":"Bool","v":false}`, `"CanCollide": {"t":"Nil"}`))
 }
@@ -247,7 +246,7 @@ func TestApplyRenamesAndMovesParts(t *testing.T) {
 	f.assertFile("s/lib/Light.Part.inst.json", want)
 	f.assertMissing("s/Light.Part.inst.json")
 
-	// with children it's a folder, which moves whole
+	// With children, the part is a folder, and the folder moves as one unit.
 	f.apply(protocol.Patch{Added: []protocol.Instance{script("glow", "lamp", "Glow", "Script", "glow")}})
 	f.assertFile("s/lib/Light/init.Part.inst.json", want)
 	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: "lamp", Parent: w, Name: "Lamp"}}})
@@ -305,7 +304,7 @@ func TestPropsFileFollowsItsScript(t *testing.T) {
 	f.assertFile("s/lib/Boot.Script.inst.json", want)
 	f.assertMissing("s/Boot.Script.inst.json")
 
-	// getting a child turns it into a folder, and the file goes inside
+	// When the instance gets a child, it becomes a folder, and its file goes into the folder.
 	f.apply(protocol.Patch{Added: []protocol.Instance{script("kid", id, "Kid", "ModuleScript", "kid")}})
 	f.assertFile("s/lib/Boot/init.server.luau", "x")
 	f.assertFile("s/lib/Boot/init.Script.inst.json", want)
@@ -333,8 +332,8 @@ func TestScriptDeleteTrashesItsPropsFile(t *testing.T) {
 	}
 }
 
-// deleting a script's file outside verde should delete the script, even if its .inst.json
-// is still there. otherwise it'd come back with no text
+// If a person deletes the file of a script outside Verde, the script must go away, also if its .inst.json file stays.
+// If the script does not go away, it comes back with no text.
 func TestLeftoverPropsFileDoesntBringBackScript(t *testing.T) {
 	f := newFixture(t, map[string]string{
 		"s/Main.server.luau":      "x",
@@ -352,8 +351,8 @@ func TestLeftoverPropsFileDoesntBringBackScript(t *testing.T) {
 	}
 }
 
-// a leftover .inst.json holds values the tree doesn't have, and a scan would send them to
-// studio. the new script wins, and the leftover goes to the trash
+// An old .inst.json file holds values that the tree does not have, and a scan sends them to Studio.
+// The new script wins, and the old file goes to the trash.
 func TestNewScriptReplacesLeftoverPropsFile(t *testing.T) {
 	leftover := `{"props": {"Disabled": {"t": "Bool", "v": true}}}`
 	f := newFixture(t, map[string]string{
@@ -363,7 +362,7 @@ func TestNewScriptReplacesLeftoverPropsFile(t *testing.T) {
 	f.apply(protocol.Patch{Added: []protocol.Instance{script("n", f.ref("game/W"), "New", "Script", "new")}})
 	f.assertMissing("s/New.Script.inst.json")
 
-	// renaming onto one has the same problem
+	// A rename onto an old .inst.json file has the same problem.
 	os.WriteFile(filepath.Join(f.cfg.Root, "s/Next.Script.inst.json"), []byte(leftover), 0o644)
 	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: f.ref("game/W/Old"), Name: "Next"}}})
 	f.assertMissing("s/Next.Script.inst.json")
@@ -378,7 +377,7 @@ func TestFolderProps(t *testing.T) {
 		{ID: "lib", Parent: w, Name: "lib", Class: "Folder", Props: tags},
 	}})
 
-	// only a folder with something to store has a file, to keep the source tree clean
+	// A folder gets a .inst.json file only if it has data to store. This keeps the source tree clean.
 	f.assertMissing("s/Plain/init.Folder.inst.json")
 	f.assertFile("s/lib/init.Folder.inst.json", propsFile(`"$tags": {"t":"Tags","v":["Code"]}`))
 
@@ -407,7 +406,7 @@ func TestRefPropsStayOutOfFiles(t *testing.T) {
 	}
 }
 
-// service props aren't synced, so there's no file for them, and an update mustn't make one
+// Verde does not sync the properties of services. Thus services have no .inst.json file, and an update must not make one.
 func TestMountPropsStayOutOfFiles(t *testing.T) {
 	f := newFixture(t, nil, syncW)
 	w := f.ref("game/W")
@@ -438,7 +437,7 @@ func TestApplyDangerousNamesAndClasses(t *testing.T) {
 		}
 	}
 
-	// a class is part of the file name, and it comes from the client too
+	// The class is part of the file name, and the class also comes from the client.
 	for _, class := range []string{"../../escape", "a/b", "a.b", "", "init.luau"} {
 		_, errs := Apply(f.cfg, f.tree, f.mounts, protocol.Patch{Added: []protocol.Instance{
 			{ID: protocol.Ref("bad-" + class), Parent: w, Name: "Bad", Class: class},
@@ -469,7 +468,7 @@ func TestSameNameDifferentClassParts(t *testing.T) {
 	f.assertFile("s/Lamp.luau", "x")
 }
 
-// studio is full of parts called Part, and each needs its own file
+// Studio has many parts with the name Part, and each part needs its own file.
 func TestSameNameParts(t *testing.T) {
 	f := newFixture(t, nil, syncW)
 	w := f.ref("game/W")
@@ -486,7 +485,7 @@ func TestSameNameParts(t *testing.T) {
 		t.Errorf("files = %v", got)
 	}
 
-	// a change goes to the right file, and comes back with the right instance
+	// A change goes to the correct file, and a scan gives the change back on the correct instance.
 	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: "second", Props: boolProp("Locked", true)}}})
 	f.assertFile(first, "{\n  \"id\": \"first\",\n  \"props\": {\n    \"Anchored\": {\"t\":\"Bool\",\"v\":true}\n  }\n}\n")
 	f.assertFile(second, "{\n  \"id\": \"second\",\n  \"name\": \"Part\",\n  \"props\": {\n    \"Anchored\": {\"t\":\"Bool\",\"v\":false},\n    \"Locked\": {\"t\":\"Bool\",\"v\":true}\n  }\n}\n")
@@ -506,7 +505,7 @@ func TestSameNameParts(t *testing.T) {
 	}
 }
 
-// nothing here should send a patch back, or lose track of which file is whose
+// No step here may send a patch back, or match a file to the wrong instance.
 func TestSameNamePartsLifecycle(t *testing.T) {
 	f := newFixture(t, map[string]string{"s/lib/.keep": ""}, syncW)
 	w, lib := f.ref("game/W"), f.ref("game/W/lib")
@@ -516,7 +515,7 @@ func TestSameNamePartsLifecycle(t *testing.T) {
 	}})
 	second := "s/Part" + tagFor("second")
 
-	// getting a child: the tag stays with it
+	// The instance gets a child. The tag stays with the instance.
 	f.apply(protocol.Patch{Added: []protocol.Instance{{ID: "kid", Parent: "second", Name: "Glow", Class: "PointLight"}}})
 	f.assertMissing(second + ".Part.inst.json")
 	f.assertFile(second+"/Glow.PointLight.inst.json", "{}\n")
@@ -524,23 +523,23 @@ func TestSameNamePartsLifecycle(t *testing.T) {
 		t.Errorf("no name in %s", f.read(second+"/init.Part.inst.json"))
 	}
 
-	// the first, with children too, needs a folder with the same name. it's the first's
+	// The first instance gets a child too, so it needs a folder with the same name. That folder belongs to the first instance.
 	f.apply(protocol.Patch{Added: []protocol.Instance{{ID: "kid2", Parent: "first", Name: "Glow", Class: "PointLight"}}})
 	f.assertFile("s/Part/Glow.PointLight.inst.json", "{}\n")
 
-	// a rename to a free name loses the tag, and the name and id it needed
+	// A rename to a free name removes the tag. It also removes the name and the ref from the .inst.json file.
 	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: "second", Name: "Lamp"}}})
 	f.assertFile("s/Lamp/init.Part.inst.json", propsFile(`"Anchored": {"t":"Bool","v":true}`))
 	f.assertMissing(second)
 
-	// a rename onto a taken name gets one
+	// A rename to a name that a sibling uses adds a tag.
 	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: "second", Name: "Part"}}})
 	f.assertMissing("s/Lamp")
 	if !strings.Contains(f.read(second+"/init.Part.inst.json"), `"id": "second"`) {
 		t.Errorf("no id in %s", f.read(second+"/init.Part.inst.json"))
 	}
 
-	// a move to where it's the only one loses it too
+	// A move to a folder where no sibling has the name also removes the tag.
 	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: "second", Parent: lib}}})
 	f.assertFile("s/lib/Part/init.Part.inst.json", propsFile(`"Anchored": {"t":"Bool","v":true}`))
 	f.assertMissing(second)
@@ -593,7 +592,7 @@ func TestSameNameEachClass(t *testing.T) {
 	}
 }
 
-// a sibling added in the same patch that frees the name doesn't need a tag
+// If the same patch frees the name, the added sibling does not keep a tag.
 func TestTagOnlyLastsAsLongAsNeeded(t *testing.T) {
 	f := newFixture(t, nil, syncW)
 	w := f.ref("game/W")
@@ -608,15 +607,15 @@ func TestTagOnlyLastsAsLongAsNeeded(t *testing.T) {
 	f.assertFile("s/Part.Part.inst.json", propsFile(`"Anchored": {"t":"Bool","v":true}`))
 }
 
-// a lone instance has a file with no id, until a second one turns up
+// An instance with no sibling of the same name has a file with no stored ref. The ref comes only when a second instance appears.
 func TestLoneInstanceHasNoId(t *testing.T) {
 	f := newFixture(t, nil, syncW)
 	f.apply(protocol.Patch{Added: []protocol.Instance{{ID: "a", Parent: f.ref("game/W"), Name: "Part", Class: "Part"}}})
 	f.assertFile("s/Part.Part.inst.json", "{}\n")
 }
 
-// someone renames a tagged file to something readable. it holds its name and id, so it's
-// still the same instance, and changes have to find it instead of making a duplicate
+// A person renames a tagged file to a readable name. The file holds its name and ref, so it is still the same instance.
+// Changes must find this file, and must not make a second copy.
 func TestRenamedTaggedFileIsStillFound(t *testing.T) {
 	f := newFixture(t, nil, syncW)
 	w := f.ref("game/W")
@@ -689,7 +688,7 @@ func TestLoadUsesStoredNameAndId(t *testing.T) {
 	}
 }
 
-// files moved by hand keep their ids, so the instance moves instead of being replaced
+// A file that a person moves keeps its stored ref. Thus the instance moves, and Verde does not replace it.
 func TestMovingFileByHandMovesTheInstance(t *testing.T) {
 	f := newFixture(t, map[string]string{
 		"s/old/Wheel.Part.inst.json": `{"id": "w", "props": {"Anchored": {"t": "Bool", "v": true}}}`,
@@ -727,7 +726,8 @@ func TestApplyIgnoredInstFiles(t *testing.T) {
 		{ID: "main", Parent: w, Name: "Main", Class: "Script", Props: mergeProps(srcProps("x"), boolProp("Disabled", true))},
 		{ID: "lib", Parent: w, Name: "lib", Class: "Folder", Props: boolProp("Enabled", true)},
 	}})
-	// a part has nowhere else to be. a script and a folder still exist without the file
+	// Only the part gives an error, because the .inst.json file is the only file of a part.
+	// The script and the folder have other files, so they exist without the .inst.json file.
 	if len(errs) != 1 {
 		t.Errorf("errs = %v, want one", errs)
 	}
@@ -743,8 +743,8 @@ func TestApplyIgnoredInstFiles(t *testing.T) {
 	f.assertNoEcho()
 }
 
-// a second instance needs a .inst.json to hold its name. if that's ignored it can't have
-// one, and the first's file has to stay untouched
+// A second instance needs a .inst.json file to hold its name. If ignore.paths matches that file, the instance cannot have one.
+// The file of the first instance must stay the same.
 func TestSameNameWithIgnoredInstFiles(t *testing.T) {
 	f := newFixture(t, nil, syncW+"ignore: {paths: [\"**/*.inst.json\"]}\n")
 	w := f.ref("game/W")
@@ -776,8 +776,8 @@ func mergeProps(a, b map[string]protocol.Value) map[string]protocol.Value {
 	return out
 }
 
-// saving the same state twice has to leave the bytes alone, or every prop change would
-// rewrite unrelated files, and git would show diffs that mean nothing
+// Two saves of the same state must give the same bytes.
+// If not, each property change writes unrelated files again, and git shows diffs with no meaning.
 func TestEncodeInstIsStable(t *testing.T) {
 	props := map[string]protocol.Value{
 		"Zed":     {Type: "Number", Value: json.RawMessage(`1`)},
@@ -828,7 +828,7 @@ func TestDiffSeesHandEditedInstFiles(t *testing.T) {
 	lamp, old := f.ref("game/W/Lamp"), f.ref("game/W/Old")
 	root := f.cfg.Root
 
-	// reformatting isn't a change
+	// A change to the format of the file is not a change to the instance.
 	os.WriteFile(filepath.Join(root, "s/Lamp.Part.inst.json"), []byte(`{"props":{"Size":{"t":"Vector3","v":[1.0,2,3]},"Anchored":{"v":true,"t":"Bool"}}}`), 0o644)
 	f.assertNoEcho()
 

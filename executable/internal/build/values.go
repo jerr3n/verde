@@ -14,8 +14,8 @@ import (
 	"github.com/jerr3n/verde/executable/internal/protocol"
 )
 
-// property returns the element for one property, and the name it's saved under. An empty
-// element means there's nothing to write, like a Nil, which a new instance already has.
+// property returns the XML element for one property, and the saved name of the property.
+// An empty element means that there is nothing to write. An example is a Nil, because a new instance already has that value.
 func (b *builder) property(inst protocol.Instance, name string, value protocol.Value) (element, saved string, err error) {
 	switch name {
 	case "$tags":
@@ -43,7 +43,7 @@ func (b *builder) property(inst protocol.Instance, name string, value protocol.V
 	return element, saved, err
 }
 
-// element converts a wire value to the type the database says the property has.
+// element changes a wire value into the XML element for dataType, the type that the database gives.
 func (b *builder) element(name, dataType string, value protocol.Value) (string, error) {
 	if value.Type == "Nil" {
 		return b.nilElement(name, dataType), nil
@@ -191,7 +191,7 @@ func (b *builder) element(name, dataType string, value protocol.Value) (string, 
 		}
 		var text strings.Builder
 		for _, k := range keypoints {
-			// The last number is an envelope, which colors have no use for.
+			// The last number is an envelope. Colors do not use it, so it is 0.
 			fmt.Fprintf(&text, "%s %s %s %s 0 ", float32Text(k[0]), float32Text(k[1]), float32Text(k[2]), float32Text(k[3]))
 		}
 		return tag("ColorSequence", name, text.String()), nil
@@ -215,7 +215,7 @@ func (b *builder) element(name, dataType string, value protocol.Value) (string, 
 	return "", fmt.Errorf("%s properties aren't supported yet", dataType)
 }
 
-// nilElement writes an empty value where the type has a way to say so.
+// nilElement returns an empty value for dataType. It returns "" if the type has no empty value.
 func (b *builder) nilElement(name, dataType string) string {
 	switch dataType {
 	case "Ref":
@@ -228,7 +228,7 @@ func (b *builder) nilElement(name, dataType string) string {
 	return ""
 }
 
-// contentElement accepts both wire types, since a ContentId reads as a string in Studio.
+// contentElement accepts the Content and String wire types, because Studio reads a ContentId as a string.
 func contentElement(name, dataType string, value protocol.Value) (string, error) {
 	var text string
 	if value.Type != "Content" && value.Type != "String" {
@@ -281,7 +281,7 @@ func (b *builder) enumNumber(enum, item string) (int64, error) {
 	return number, nil
 }
 
-// font returns a Font's family, weight number and style name.
+// font returns the family, the weight number, and the style name of a Font.
 func (b *builder) font(value protocol.Value, dataType string) (family string, weight int64, style string, err error) {
 	var parts []string
 	if err := decode(value, "Font", dataType, &parts); err != nil {
@@ -302,6 +302,7 @@ func (b *builder) font(value protocol.Value, dataType string) (family string, we
 	return parts[0], weight, parts[2], nil
 }
 
+// tag returns an element with the given name attribute and body.
 func tag(element, name, body string) string {
 	return "<" + element + " name=\"" + escape(name) + "\">" + body + "</" + element + ">"
 }
@@ -310,8 +311,8 @@ func binaryElement(name string, data []byte) string {
 	return tag("BinaryString", name, base64.StdEncoding.EncodeToString(data))
 }
 
-// protected writes a script's text. CDATA keeps it readable, but an XML reader turns \r\n
-// into \n even inside CDATA, so text with \r has to be escaped instead.
+// protected returns the text of a script for the XML file. CDATA keeps the text easy to read.
+// But an XML reader changes \r\n into \n, also inside CDATA. Thus protected escapes text that has \r.
 func protected(text string) string {
 	if strings.Contains(text, "\r") {
 		return escape(text)
@@ -338,7 +339,8 @@ func children(fields []string, values []float64) string {
 func float32Text(v float64) string {
 	switch single := float32(v); {
 	case math.IsInf(float64(single), 1):
-		return "INF" // a double too big for a float, and Go would write +Inf
+		// The double is too large for a float. Go writes +Inf, but the format needs INF.
+		return "INF"
 	case math.IsInf(float64(single), -1):
 		return "-INF"
 	default:
@@ -350,8 +352,8 @@ func intText(v float64) string {
 	return strconv.FormatInt(int64(v), 10)
 }
 
-// integerText reads the number's own text where it can, since a float64 would round a large
-// Int64. Studio can write these as 1e+15, so that form has to work too.
+// integerText returns the integer text from raw. It uses the text of raw if possible, because a float64 rounds a large Int64.
+// Studio can write an integer as 1e+15, so integerText also accepts that form.
 func integerText(raw json.RawMessage, bits int) (string, error) {
 	text := string(raw)
 	if n, err := strconv.ParseInt(text, 10, bits); err == nil {
@@ -368,6 +370,7 @@ func integerText(raw json.RawMessage, bits int) (string, error) {
 	return strconv.FormatInt(int64(f), 10), nil
 }
 
+// colorByte changes a color part from 0 to 1 into a byte from 0 to 255.
 func colorByte(v float64) uint8 {
 	return uint8(math.Round(math.Max(0, math.Min(1, v)) * 255))
 }

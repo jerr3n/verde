@@ -11,7 +11,7 @@ import (
 )
 
 func TestInitWritesAValidConfig(t *testing.T) {
-	// The name has characters that would break the YAML if it weren't encoded.
+	// The name has characters that break the YAML if Init does not encode them.
 	dir := filepath.Join(t.TempDir(), "my: game #1")
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -73,7 +73,7 @@ func TestInitKeepsExistingFolders(t *testing.T) {
 
 func TestInitRemovesConfigIfAFolderFails(t *testing.T) {
 	dir := t.TempDir()
-	// A file called src stops any of the sync folders from being created.
+	// A file with the name src stops Init from making each sync folder.
 	blocker := filepath.Join(dir, "src")
 	if err := os.WriteFile(blocker, []byte("mine"), 0o644); err != nil {
 		t.Fatal(err)

@@ -19,6 +19,8 @@ import (
 	"go.uber.org/zap"
 )
 
+// serve loads the project and starts the sync session and the disk watcher.
+// It then accepts WebSocket connections on cfg.Addr() and blocks until the HTTP server stops.
 func serve(ctx context.Context, logger *zap.Logger, cfg *config.Cfg) error {
 	tree, mnts, err := project.Load(cfg)
 	if err != nil {
@@ -50,6 +52,7 @@ func serve(ctx context.Context, logger *zap.Logger, cfg *config.Cfg) error {
 	r := gin.New()
 	r.Use(logging.Middleware(logger), logging.Recovery(logger))
 
+	// A client can connect at "/" or at "/ws". A plain HTTP request to "/" gets a JSON reply.
 	r.GET("/", func(c *gin.Context) {
 		if c.IsWebsocket() {
 			handleWs(c)

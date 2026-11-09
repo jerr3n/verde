@@ -15,8 +15,8 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// Middleware logs one entry per request. 5xx responses are logged at Error,
-// 4xx at Warn and everything else at Info.
+// Middleware writes one log entry for each request.
+// The level is Error for a 5xx status, Warn for a 4xx status, and Info for all other statuses.
 func Middleware(l *zap.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
@@ -27,7 +27,9 @@ func Middleware(l *zap.Logger) gin.HandlerFunc {
 
 		status := c.Writer.Status()
 		size := c.Writer.Size()
-		if size < 0 { // nothing written yet (e.g. Gin writes 404 bodies after middleware)
+		// Size is -1 when no body is written yet.
+		// For example, Gin writes the 404 body after the middleware runs.
+		if size < 0 {
 			size = 0
 		}
 		fields := []zap.Field{
@@ -57,9 +59,9 @@ func Middleware(l *zap.Logger) gin.HandlerFunc {
 	}
 }
 
-// Recovery recovers from panics, logs them with a stack trace and responds
-// with 500. Panics caused by a dropped client connection are logged without
-// a stack trace and no response is written.
+// Recovery stops a panic in a handler, logs it with a stack trace, and sends status 500.
+// If the panic comes from a broken client connection, Recovery logs it without a stack trace.
+// It sends no response in that case, because the client cannot receive it.
 func Recovery(l *zap.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
@@ -92,8 +94,9 @@ func Recovery(l *zap.Logger) gin.HandlerFunc {
 	}
 }
 
-// RouteLogger returns a function for gin.DebugPrintRouteFunc, so Gin's route
-// registration output (printed only in debug mode) goes through zap.
+// RouteLogger returns a function for gin.DebugPrintRouteFunc.
+// The function sends each route that Gin registers to zap at the Debug level.
+// Gin calls it only in debug mode.
 func RouteLogger(l *zap.Logger) func(httpMethod, absolutePath, handlerName string, nuHandlers int) {
 	return func(httpMethod, absolutePath, handlerName string, nuHandlers int) {
 		l.Debug("route registered",
@@ -105,6 +108,7 @@ func RouteLogger(l *zap.Logger) func(httpMethod, absolutePath, handlerName strin
 	}
 }
 
+// isBrokenPipe reports whether err comes from a client that closed or reset its connection.
 func isBrokenPipe(err error) bool {
 	var opErr *net.OpError
 	if !errors.As(err, &opErr) {

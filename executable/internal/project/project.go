@@ -1,5 +1,11 @@
 // SPDX-License-Identifier: MPL-2.0
 
+// Package project changes the files in the sync folders into a tree of instances, and writes changes from Studio back to the files.
+//
+// The file names follow these rules:
+//   - Name.server.luau is a Script. Name.client.luau is a LocalScript. Name.luau is a ModuleScript.
+//   - A folder is a Folder. If the folder has an init file, the init file sets the class of the folder.
+//   - A .inst.json file holds the properties and the stored ref of an instance.
 package project
 
 import (
@@ -21,9 +27,9 @@ import (
 	"github.com/jerr3n/verde/executable/internal/tree"
 )
 
-// Load reads every sync target in cfg. It returns the tree and mounts a snapshot
-// needs, or an error if anything is wrong. There's no partial result, because a
-// snapshot with files missing could make the plugin delete them from disk.
+// Load reads each sync folder in cfg, and returns the tree and the mounts for a snapshot.
+// If one file or folder has a problem, Load returns an error and no tree.
+// A tree with missing files is dangerous, because the plugin could then delete those files from disk.
 func Load(cfg *config.Cfg) (*tree.Tree, []protocol.Mount, error) {
 	for _, pattern := range cfg.Ignore.Paths {
 		if !doublestar.ValidatePattern(pattern) {
@@ -31,7 +37,7 @@ func Load(cfg *config.Cfg) (*tree.Tree, []protocol.Mount, error) {
 		}
 	}
 
-	// os.Root refuses anything that leaves the project, including through symlinks.
+	// os.Root refuses each path that goes outside the project, also through a symlink.
 	root, err := os.OpenRoot(cfg.Root)
 	if err != nil {
 		return nil, nil, err
@@ -61,13 +67,14 @@ func Load(cfg *config.Cfg) (*tree.Tree, []protocol.Mount, error) {
 	return l.tree, l.mounts, nil
 }
 
+// newRef makes a new random ref.
 func newRef() protocol.Ref {
 	return protocol.Ref(uuid.New().String())
 }
 
-// classify works out what a file becomes from its name. ok is false if it isn't a
-// script. It stops at the first matching suffix, because ".luau" also matches the
-// other two.
+// classify returns the instance name and the script class for a file name.
+// ok is false if the file is not a script, or if the name before the suffix is empty.
+// classify uses the first suffix that matches, because ".luau" also matches the other two suffixes.
 func classify(filename string) (name, class string, ok bool) {
 	for _, kind := range scriptKinds {
 		if name, found := strings.CutSuffix(filename, kind.suffix); found {
@@ -77,13 +84,14 @@ func classify(filename string) (name, class string, ok bool) {
 	return "", "", false
 }
 
+// scriptKinds maps each script file suffix to its class. The longest suffixes come first.
 var scriptKinds = []struct{ suffix, class string }{
 	{".server.luau", "Script"},
 	{".client.luau", "LocalScript"},
 	{".luau", "ModuleScript"},
 }
 
-// scriptSuffix returns the file suffix for a script class, or "" for anything else.
+// scriptSuffix returns the file suffix for a script class. It returns "" for a class that is not a script.
 func scriptSuffix(class string) string {
 	for _, kind := range scriptKinds {
 		if kind.class == class {
@@ -93,53 +101,57 @@ func scriptSuffix(class string) string {
 	return ""
 }
 
-// isInit reports whether a file is the script of the folder it's in. It's
-// case-sensitive, so Init.luau is a normal ModuleScript.
+// isInit reports whether a file is the script of its folder, for example init.server.luau.
+// The check is case-sensitive. Thus Init.luau is a usual ModuleScript.
 func isInit(filename string) bool {
 	name, _, ok := classify(filename)
 	return ok && name == "init"
 }
 
-// sibling identifies an instance among its siblings, the way the plugin matches them.
+// sibling identifies an instance among its siblings. The plugin uses the same key to match instances.
 type sibling struct {
 	parent      protocol.Ref
 	name, class string
 }
 
+// loader holds the state of one Load.
 type loader struct {
-	cfg    *config.Cfg
-	files  fs.FS // project folder
+	cfg *config.Cfg
+	// files is the project folder.
+	files  fs.FS
 	tree   *tree.Tree
 	mounts []protocol.Mount
-	refs   map[string]protocol.Ref // mount path -> Ref, with "" as the DataModel
-	seen   map[sibling]string      // instances so far w/ no id -> file each came from
-	ids    map[protocol.Ref]string // ids from .inst.json files -> file each came from
+	// refs maps each mount path to its ref. The key "" is the DataModel.
+	refs map[string]protocol.Ref
+	// seen maps each instance without a stored ref to the file or folder that it came from.
+	seen map[sibling]string
+	// ids maps each stored ref to the file or folder that it came from.
+	ids map[protocol.Ref]string
 }
 
-// addMount adds a sync target from the config, such as
-// "StarterPlayer/StarterPlayerScripts", along with any parents on the way to it. It
-// returns the target's Ref, so its files can be loaded as children of that instance.
+// addMount adds a sync target from the config, for example "StarterPlayer/StarterPlayerScripts".
+// It also adds each ancestor of the target that is not in the tree yet.
+// It returns the ref of the target. The files in the sync folder become children of that instance.
 //
-// Mounts already exist in the game, so the plugin finds them by path and never
-// creates them.
+// Each mount is already in the game. The plugin finds a mount by its path, and does not create it.
 func (l *loader) addMount(instance string) (protocol.Ref, error) {
 	names := strings.Split(instance, "/")
 
-	// Start at the DataModel, which Load stores under the empty path.
+	// Start at the DataModel. Load stores the DataModel at the empty path.
 	parent := l.refs[""]
 
-	// Walk down one level at a time: "StarterPlayer", then
+	// Go down one level at a time. For example, "StarterPlayer" comes first, and then
 	// "StarterPlayer/StarterPlayerScripts".
 	for depth, name := range names {
 		key := strings.Join(names[:depth+1], "/")
 
-		// Sync targets can share a parent, which must only be added once.
+		// Two sync targets can have the same parent. Add each parent only one time.
 		ref, seen := l.refs[key]
 		if !seen {
 			ref = newRef()
 
-			// A mount's class is taken from its name, which works because a service's
-			// name matches its class.
+			// The class of a mount is the same as its name.
+			// This is correct because the name of a service is the same as its class.
 			err := l.tree.Insert(protocol.Instance{Name: name, Parent: parent, ID: ref, Class: name})
 			if err != nil {
 				return "", err
@@ -147,26 +159,26 @@ func (l *loader) addMount(instance string) (protocol.Ref, error) {
 
 			l.mounts = append(l.mounts, protocol.Mount{
 				ID: ref,
-				// Clone so this mount doesn't share memory with names.
+				// Copy the slice, so that this mount does not share memory with names.
 				Path: slices.Clone(names[:depth+1]),
-				// Only the last level is the real sync target. Anything above it is
-				// just on the way there, so the plugin won't watch or change it.
+				// Only the last level is the sync target. Each level above it only holds the target.
+				// The plugin does not watch or change those levels.
 				Sync: depth == len(names)-1,
 			})
 			l.refs[key] = ref
 		}
 
-		// The next level goes under this one.
+		// The next level is a child of this level.
 		parent = ref
 	}
 
-	// After the loop, parent is the sync target itself.
+	// After the loop, parent is the sync target.
 	return parent, nil
 }
 
-// loadMount checks a sync folder, then loads what's inside it under the mount.
+// loadMount checks the sync folder dir, and then loads its contents as children of mount.
 func (l *loader) loadMount(dir, instancePath string, mount protocol.Ref) error {
-	// A missing folder counts as empty, so a new project can still start.
+	// A missing folder is the same as an empty folder. Thus a new project can start.
 	info, err := fs.Stat(l.files, dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -175,12 +187,12 @@ func (l *loader) loadMount(dir, instancePath string, mount protocol.Ref) error {
 		return err
 	}
 
-	// The config might point at a file by mistake.
+	// The config can point at a file by mistake.
 	if !info.IsDir() {
 		return fmt.Errorf("%s is not a folder", dir)
 	}
 
-	// A service like Workspace can't become a script.
+	// A service such as Workspace cannot become a script, so a sync folder cannot have an init file.
 	init, err := l.findInit(dir)
 	if err != nil {
 		return err
@@ -189,12 +201,11 @@ func (l *loader) loadMount(dir, instancePath string, mount protocol.Ref) error {
 		return fmt.Errorf("%s: a service can't have an init file", dir)
 	}
 
-	// Everything inside the folder goes under the mount.
 	return l.loadChildren(dir, instancePath, mount)
 }
 
-// loadChildren sends each entry in a folder to loadDir or loadFile. fs.ReadDir sorts
-// entries by name, which keeps sibling order the same between connects.
+// loadChildren sends each entry in a folder to loadDir or to loadFile.
+// fs.ReadDir sorts the entries by name. Thus the order of siblings is the same on each connect.
 func (l *loader) loadChildren(dir, instancePath string, parent protocol.Ref) error {
 	entries, err := fs.ReadDir(l.files, dir)
 	if err != nil {
@@ -202,7 +213,7 @@ func (l *loader) loadChildren(dir, instancePath string, parent protocol.Ref) err
 	}
 
 	for _, entry := range entries {
-		// Symlinks could lead outside the project, so they aren't followed.
+		// A symlink can point outside the project, so Load does not follow symlinks.
 		if !entry.IsDir() && !entry.Type().IsRegular() {
 			continue
 		}
@@ -228,8 +239,8 @@ func (l *loader) loadChildren(dir, instancePath string, parent protocol.Ref) err
 	return nil
 }
 
-// turns a folder into an instance, then loads what's inside. its init file decides what it
-// becomes, otherwise it's a Folder
+// loadDir adds a folder as an instance, and then loads its contents.
+// The init file of the folder sets the class. A folder without an init file is a Folder.
 func (l *loader) loadDir(full, name, instancePath string, parent protocol.Ref) error {
 	init, err := l.findInit(full)
 	if err != nil {
@@ -252,7 +263,7 @@ func (l *loader) loadDir(full, name, instancePath string, parent protocol.Ref) e
 		name = file.Name
 	}
 
-	// Skipping an ignored folder also skips everything inside it.
+	// If the folder is ignored, its contents are also ignored.
 	childPath := instancePath + "/" + name
 	if l.instanceIgnored(childPath, class) {
 		return nil
@@ -265,8 +276,10 @@ func (l *loader) loadDir(full, name, instancePath string, parent protocol.Ref) e
 	return l.loadChildren(full, childPath, ref)
 }
 
-// turns a script or .inst.json file into an instance. skips init files, loadDir used those.
-// a script's .inst.json is read w/ its script, so a leftover one can't bring it back
+// loadFile adds a script file or a .inst.json file as an instance.
+// It skips init files, because loadDir reads them.
+// It skips the .inst.json file of a script, because it reads that file with the script.
+// Thus a .inst.json file that stays after its script is deleted does not add the script again.
 func (l *loader) loadFile(full, filename, instancePath string, parent protocol.Ref) error {
 	if name, class, ok := classifyInst(filename); ok {
 		if name == "init" || scriptSuffix(class) != "" {
@@ -306,19 +319,20 @@ func (l *loader) loadFile(full, filename, instancePath string, parent protocol.R
 	return err
 }
 
-// adds an instance to the tree and returns its ref. origin is the file or folder it came
-// from. if source is set, that file's text becomes Source
+// insert adds an instance to the tree and returns its ref.
+// origin is the file or folder that the instance came from. Error messages use origin.
+// If source is not empty, the text of the file source becomes the Source property.
 func (l *loader) insert(parent protocol.Ref, name, class, origin, source string, file instFile) (protocol.Ref, error) {
 	id := file.ID
 	if id != "" {
-		// copying a file copies its id, and they can't be the same instance
+		// A copy of a file has the same stored ref, but the copy is a different instance.
 		if other, exists := l.ids[id]; exists {
 			return "", fmt.Errorf("%s and %s have the same id. Remove the id from the copy, and give it another name", other, origin)
 		}
 		l.ids[id] = origin
 	} else {
-		// Foo.luau and Foo/init.luau would both be a ModuleScript called Foo. nothing tells
-		// them apart, so verde wouldn't know which one a change from studio was for
+		// Foo.luau and Foo/init.luau both become a ModuleScript with the name Foo.
+		// Nothing makes them different. Thus Verde cannot know which one a change from Studio is for.
 		key := sibling{parent, name, class}
 		if other, exists := l.seen[key]; exists {
 			return "", fmt.Errorf("%s and %s are both a %s called %s", other, origin, class, name)
@@ -335,8 +349,8 @@ func (l *loader) insert(parent protocol.Ref, name, class, origin, source string,
 			return "", err
 		}
 
-		// json.Marshal would silently replace invalid bytes, and syncing that text
-		// back could corrupt the file.
+		// json.Marshal replaces invalid bytes and gives no error.
+		// If that text syncs back to disk, the file can become corrupt.
 		if !utf8.Valid(text) {
 			return "", fmt.Errorf("%s is not valid UTF-8", source)
 		}
@@ -356,8 +370,9 @@ func (l *loader) insert(parent protocol.Ref, name, class, origin, source string,
 	return inst.ID, nil
 }
 
-// returns a folder's init file, or "" if it doesn't have one. more than one is an error,
-// since a folder can only become one instance
+// findInit returns the name of the init file in dir, or "" if dir has no init file.
+// An init file is an init script or an init .inst.json file. Ignored files do not count.
+// More than one init file is an error, because a folder can become only one instance.
 func (l *loader) findInit(dir string) (string, error) {
 	entries, err := fs.ReadDir(l.files, dir)
 	if err != nil {
@@ -384,7 +399,7 @@ func (l *loader) findInit(dir string) (string, error) {
 	return found, nil
 }
 
-// pathIgnored reports whether a path from the project root matches ignore.paths.
+// pathIgnored reports whether full matches ignore.paths. full is a path from the project root.
 func (l *loader) pathIgnored(full string) (bool, error) {
 	for _, pattern := range l.cfg.Ignore.Paths {
 		matched, err := doublestar.Match(pattern, full)
@@ -398,9 +413,8 @@ func (l *loader) pathIgnored(full string) (bool, error) {
 	return false, nil
 }
 
-// instanceIgnored reports whether an instance matches ignore.instances or
-// ignore.classes. These have to be filtered here, because the plugin would still
-// create an ignored instance that's in the snapshot.
+// instanceIgnored reports whether an instance matches ignore.instances or ignore.classes.
+// Load must remove these instances, because the plugin creates each instance that is in the snapshot.
 func (l *loader) instanceIgnored(instancePath, class string) bool {
 	return slices.Contains(l.cfg.Ignore.Instances, instancePath) ||
 		slices.Contains(l.cfg.Ignore.Classes, class)

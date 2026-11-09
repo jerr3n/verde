@@ -13,7 +13,8 @@ import (
 	"github.com/jerr3n/verde/executable/internal/protocol"
 )
 
-// Type ids from https://dom.rojo.space/attributes. They aren't the binary place format's.
+// These are the type IDs from https://dom.rojo.space/attributes.
+// They are different from the type IDs of the binary place format.
 const (
 	attrString         = 0x02
 	attrBool           = 0x03
@@ -33,8 +34,8 @@ const (
 	attrFont           = 0x21
 )
 
-// encodeAttributes turns $attributes, a list of [name, value] pairs, into the blob saved as
-// AttributesSerialize. It returns nothing if there aren't any.
+// encodeAttributes changes $attributes, a list of [name, value] pairs, into the binary data of AttributesSerialize.
+// It returns nil if the list is empty.
 func (b *builder) encodeAttributes(value protocol.Value) ([]byte, error) {
 	var pairs [][2]json.RawMessage
 	if err := decode(value, "Attributes", "Attributes", &pairs); err != nil {
@@ -63,6 +64,7 @@ func (b *builder) encodeAttributes(value protocol.Value) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
+// attribute writes the type ID and the value of one attribute to out.
 func (b *builder) attribute(out *attributeWriter, value protocol.Value) error {
 	const dataType = "attribute"
 
@@ -141,7 +143,8 @@ func (b *builder) attribute(out *attributeWriter, value protocol.Value) error {
 		}
 		out.WriteByte(attrCFrame)
 		out.f32s(v[:3]...)
-		out.WriteByte(0) // the rotation is stored in full, not as an id for a right-angled one
+		// 0 tells the reader that the full rotation follows. It is not the ID of a right-angle rotation.
+		out.WriteByte(0)
 		out.f32s(v[3:]...)
 	case "Enum":
 		var item []string
@@ -166,7 +169,8 @@ func (b *builder) attribute(out *attributeWriter, value protocol.Value) error {
 		out.WriteByte(attrNumberSequence)
 		out.u32(uint32(len(v)))
 		for _, k := range v {
-			out.f32s(k[2], k[0], k[1]) // saved as envelope, time, value
+			// The format stores each keypoint as envelope, time, value.
+			out.f32s(k[2], k[0], k[1])
 		}
 	case "ColorSequence":
 		v, err := keypoints(value, "ColorSequence", dataType, 4)
@@ -176,7 +180,8 @@ func (b *builder) attribute(out *attributeWriter, value protocol.Value) error {
 		out.WriteByte(attrColorSequence)
 		out.u32(uint32(len(v)))
 		for _, k := range v {
-			out.f32s(0, k[0], k[1], k[2], k[3]) // an envelope that's never used comes first
+			// Each keypoint starts with an envelope. Colors do not use it, so it is 0.
+			out.f32s(0, k[0], k[1], k[2], k[3])
 		}
 	case "Font":
 		family, weight, style, err := b.font(value, dataType)
@@ -191,15 +196,16 @@ func (b *builder) attribute(out *attributeWriter, value protocol.Value) error {
 		binary.Write(out, binary.LittleEndian, uint16(weight))
 		out.WriteByte(byte(styleNumber))
 		out.text(family)
-		out.text("") // CachedFaceId is always there, and can be empty
+		// The format always has CachedFaceId. It can be empty.
+		out.text("")
 	default:
 		return fmt.Errorf("%s attributes aren't supported", value.Type)
 	}
 	return nil
 }
 
-// attributeWriter adds the format's little-endian types to a buffer. A bytes.Buffer never
-// fails to write, so these don't return errors.
+// attributeWriter writes the little-endian types of the attribute format to a buffer.
+// A write to a bytes.Buffer cannot fail, so these methods do not return errors.
 type attributeWriter struct{ bytes.Buffer }
 
 func (w *attributeWriter) u32(v uint32) {
@@ -217,6 +223,7 @@ func (w *attributeWriter) udim(scale, offset float64) {
 	binary.Write(w, binary.LittleEndian, int32(offset))
 }
 
+// text writes the length of s as a uint32, and then the bytes of s.
 func (w *attributeWriter) text(s string) {
 	w.u32(uint32(len(s)))
 	w.WriteString(s)

@@ -8,10 +8,12 @@ import (
 	"strings"
 )
 
-// Instance names come from the client and can hold anything, including "../../x", so
-// they're never used as paths directly. encodeName percent-encodes whatever would be
-// unsafe or would read back as something else, and decodeName reverses it when
-// scanning. Names that don't need it stay readable: Util stays Util.
+// encodeName changes an instance name into a safe file name.
+// An instance name comes from the client and can hold any text, for example "../../x".
+// Thus Verde never uses an instance name as a path directly.
+// encodeName percent-encodes each character that is unsafe or that changes the meaning of the name.
+// decodeName reverses the encoding during a scan.
+// A name that needs no encoding stays the same. For example, Util stays Util.
 func encodeName(name string) string {
 	var b strings.Builder
 	for i := range len(name) {
@@ -23,31 +25,31 @@ func encodeName(name string) string {
 	}
 	s := b.String()
 
-	// A leading dot hides the file, and could make a folder called .git.
+	// A dot at the start hides the file. It can also make a folder with the name .git.
 	if strings.HasPrefix(s, ".") {
 		s = "%2E" + s[1:]
 	}
-	// Windows drops trailing dots and spaces, and this also covers ".." and ".".
+	// Windows removes dots and spaces at the end of a name. This step also changes ".." and ".".
 	if strings.HasSuffix(s, ".") {
 		s = s[:len(s)-1] + "%2E"
 	} else if strings.HasSuffix(s, " ") {
 		s = s[:len(s)-1] + "%20"
 	}
-	// A ModuleScript called x.server would otherwise come back as a Script called x.
+	// Without this step, a ModuleScript with the name x.server comes back as a Script with the name x.
 	for _, suffix := range []string{".server", ".client"} {
 		if stem, found := strings.CutSuffix(s, suffix); found {
 			s = stem + "%2E" + suffix[1:]
 		}
 	}
-	// init.luau means "the script of this folder", and Windows reserves some names.
+	// init.luau is the script of its folder, and Windows reserves some names. Encode the first letter of these names.
 	if s == "init" || isReservedOnWindows(s) {
 		s = fmt.Sprintf("%%%02X", s[0]) + s[1:]
 	}
 	return s
 }
 
-// isReservedOnWindows reports whether Windows refuses this as a file name. It looks
-// only at the part before the first dot, because NUL.luau is reserved too.
+// isReservedOnWindows reports whether Windows refuses name as a file name.
+// It checks only the part before the first dot, because Windows also reserves names such as NUL.luau.
 func isReservedOnWindows(name string) bool {
 	stem, _, _ := strings.Cut(name, ".")
 	switch strings.ToUpper(stem) {
@@ -59,8 +61,8 @@ func isReservedOnWindows(name string) bool {
 	return false
 }
 
-// decodeName turns a file or folder name back into an instance name. Only what
-// encodeName could have written is decoded, so a file like 50%off.luau keeps its name.
+// decodeName changes a file or folder name back into an instance name.
+// It decodes only the text that encodeName can write. Thus a file such as 50%off.luau keeps its name.
 func decodeName(s string) string {
 	if !strings.Contains(s, "%") {
 		return s
@@ -69,7 +71,7 @@ func decodeName(s string) string {
 	for i := 0; i < len(s); i++ {
 		if s[i] == '%' && i+2 < len(s) && isUpperHex(s[i+1]) && isUpperHex(s[i+2]) {
 			value, err := strconv.ParseUint(s[i+1:i+3], 16, 8)
-			// Encoding only touches ASCII, and anything above it isn't valid text alone.
+			// encodeName changes only ASCII bytes. A byte above ASCII is not valid text alone.
 			if err == nil && value < 0x80 {
 				b.WriteByte(byte(value))
 				i += 2
@@ -81,6 +83,7 @@ func decodeName(s string) string {
 	return b.String()
 }
 
+// isUpperHex reports whether c is a digit or an uppercase letter from A to F.
 func isUpperHex(c byte) bool {
 	return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F')
 }

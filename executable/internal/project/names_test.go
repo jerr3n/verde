@@ -46,8 +46,10 @@ func TestDecodeNameKeepsWhatEncodingCouldntWrite(t *testing.T) {
 	}
 }
 
-// The property every scan depends on: an encoded name is one path segment, comes back
-// unchanged, and isn't mistaken for a different class or an init file.
+// Each scan needs these rules for an encoded name:
+//   - It is one path segment.
+//   - It decodes back to the same name.
+//   - It does not look like a different class or an init file.
 func TestEncodeNameRoundTrips(t *testing.T) {
 	check := func(name string) bool {
 		if name == "" {

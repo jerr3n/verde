@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 
-// Package build writes a project's instances as a Roblox place or model file.
+// Package build writes the instances of a project as a Roblox place file or model file.
 //
-// It writes the XML formats (.rbxlx and .rbxmx), which https://dom.rojo.space/xml documents.
-// The same tree gives the same bytes, so a built file can be compared with the last one.
+// It writes the XML formats .rbxlx and .rbxmx. https://dom.rojo.space/xml gives the specification.
+// The same tree always gives the same bytes. Thus you can compare a built file with the previous one.
 package build
 
 import (
@@ -21,15 +21,17 @@ import (
 	"github.com/jerr3n/verde/executable/internal/tree"
 )
 
-// Result says what a build wrote.
+// Result tells what a build wrote.
 type Result struct {
 	Instances int
-	Warnings  []string // one for each kind of property that had to be left out
+	// Warnings has one entry for each type of property that the build did not write.
+	Warnings []string
 }
 
-// WriteFile builds the file at path, replacing it only once the whole file is written. The
-// extension says what to build. A place holds everything, and a model holds the instance at
-// the /-separated path in instance, such as "Workspace/Car".
+// WriteFile builds the file at path. It replaces the old file only after it writes the full new file.
+// The extension of path sets the format:
+//   - A .rbxlx place holds the full tree. instance must be empty.
+//   - A .rbxmx model holds the instance at the "/"-separated path instance, for example "Workspace/Car".
 func WriteFile(path string, t *tree.Tree, mounts []protocol.Mount, instance string) (Result, error) {
 	write, err := chooseFormat(path, t, mounts, instance)
 	if err != nil {
@@ -40,7 +42,8 @@ func WriteFile(path string, t *tree.Tree, mounts []protocol.Mount, instance stri
 	if err != nil {
 		return Result{}, err
 	}
-	defer os.Remove(file.Name()) // fails harmlessly once it's been renamed
+	// After the rename, this Remove fails, and the failure causes no problem.
+	defer os.Remove(file.Name())
 	defer file.Close()
 
 	result, err := write(file)
@@ -56,6 +59,7 @@ func WriteFile(path string, t *tree.Tree, mounts []protocol.Mount, instance stri
 	return result, os.Rename(file.Name(), path)
 }
 
+// chooseFormat returns the write function for the extension of path.
 func chooseFormat(path string, t *tree.Tree, mounts []protocol.Mount, instance string) (func(io.Writer) (Result, error), error) {
 	switch filepath.Ext(path) {
 	case ".rbxlx":
@@ -78,8 +82,8 @@ func chooseFormat(path string, t *tree.Tree, mounts []protocol.Mount, instance s
 	return nil, fmt.Errorf("can't tell what to build from %q, use .rbxlx or .rbxmx", path)
 }
 
-// findModelRoot finds the instance a model should hold. Mounts can't be one, because they
-// already exist in every game.
+// findModelRoot finds the instance that a model holds.
+// A mount cannot be the model root, because each game already has the mounts.
 func findModelRoot(t *tree.Tree, mounts []protocol.Mount, instance string) (protocol.Ref, error) {
 	found := findPath(t, t.Root(), instance)
 	switch {
@@ -96,8 +100,8 @@ func findModelRoot(t *tree.Tree, mounts []protocol.Mount, instance string) (prot
 	return found[0], nil
 }
 
-// findPath returns every instance at a path, since siblings can share a name. A name can hold
-// a /, so each child is tried against the start of what's left of the path.
+// findPath returns each instance at path. It can return more than one, because siblings can have the same name.
+// A name can hold a "/". Thus findPath compares each child name with the start of the remaining path.
 func findPath(t *tree.Tree, parent protocol.Ref, path string) []protocol.Ref {
 	var found []protocol.Ref
 	for _, child := range t.Children(parent) {
@@ -114,19 +118,21 @@ func findPath(t *tree.Tree, parent protocol.Ref, path string) []protocol.Ref {
 	return found
 }
 
-// Write writes the tree as a place. The DataModel isn't an Item in the file, so its children
-// are the file's top level.
+// Write writes the tree as a place.
+// The DataModel is not an Item in the file. Thus the children of the DataModel are the top level of the file.
 func Write(w io.Writer, t *tree.Tree) (Result, error) {
 	return write(w, t, t.Children(t.Root()), "")
 }
 
-// WriteModel writes one instance and everything inside it as a model. A Ref to anything
-// outside it is left out with a warning, since the file has nothing for it to point at.
+// WriteModel writes root and its descendants as a model.
+// WriteModel does not write a Ref property that points outside root, because the file has no target for it.
+// It adds a warning for each of these properties.
 func WriteModel(w io.Writer, t *tree.Tree, root protocol.Ref) (Result, error) {
-	// Roblox writes this for models, and the format's docs recommend keeping it.
+	// Roblox writes this Meta element for models, and the format documentation recommends it.
 	return write(w, t, []protocol.Ref{root}, "\t<Meta name=\"ExplicitAutoJoints\">true</Meta>\n")
 }
 
+// write writes the roots and their descendants in the XML format. meta goes after the <roblox> tag.
 func write(w io.Writer, t *tree.Tree, roots []protocol.Ref, meta string) (Result, error) {
 	b := &builder{tree: t, db: database(), referents: map[protocol.Ref]string{}}
 	for _, root := range roots {
@@ -152,7 +158,7 @@ func write(w io.Writer, t *tree.Tree, roots []protocol.Ref, meta string) (Result
 	return Result{Instances: len(b.referents), Warnings: b.warnings()}, nil
 }
 
-// instancePath returns an instance's path without the DataModel, to name it in warnings.
+// instancePath returns the path of an instance without the DataModel. Warnings use this path.
 func instancePath(t *tree.Tree, id protocol.Ref) string {
 	inst, ok := t.Get(id)
 	if !ok || id == t.Root() {
@@ -164,6 +170,7 @@ func instancePath(t *tree.Tree, id protocol.Ref) string {
 	return inst.Name
 }
 
+// builder holds the state of one build.
 type builder struct {
 	tree      *tree.Tree
 	db        *reflection
@@ -172,17 +179,19 @@ type builder struct {
 	skipped   []*skippedProp
 }
 
-// skippedProp is every instance that lost a property for the same reason, because a project
-// with 500 Parts shouldn't print the same line 500 times.
+// skippedProp counts the instances that lost a property for the same reason.
+// Thus a project with 500 Parts prints one warning, not the same line 500 times.
+// first is the path of the first instance.
 type skippedProp struct {
 	message string
 	first   string
 	count   int
 }
 
-// number gives an instance and everything inside it a referent. Only these are in the file,
-// so a Ref to anything else can't resolve. Roblox uses RBX and a UUID, but numbering them keeps
-// the file the same between builds, since most Refs are new on every load.
+// number gives a referent to id and to each of its descendants.
+// Only these instances are in the file. Thus a Ref to a different instance has no target.
+// Roblox uses "RBX" and a UUID. Verde uses numbers, because most refs change on each load,
+// and numbers keep the file the same between builds.
 func (b *builder) number(id protocol.Ref) {
 	b.referents[id] = fmt.Sprintf("RBX%032X", len(b.referents)+1)
 	for _, child := range b.tree.Children(id) {
@@ -190,6 +199,7 @@ func (b *builder) number(id protocol.Ref) {
 	}
 }
 
+// item writes the Item element for id and its descendants. parentPath is the path of the parent, for error messages.
 func (b *builder) item(id protocol.Ref, depth int, parentPath string) error {
 	inst, ok := b.tree.Get(id)
 	if !ok {
@@ -208,8 +218,8 @@ func (b *builder) item(id protocol.Ref, depth int, parentPath string) error {
 	fmt.Fprintf(&b.out, "%s\t<Properties>\n", indent)
 	fmt.Fprintf(&b.out, "%s\t\t<string name=\"Name\">%s</string>\n", indent, escape(inst.Name))
 
-	// Sorted so the same tree gives the same bytes. Two names can be saved as one, like
-	// Color and Color3uint8, and only the first is written.
+	// Sort the names, so that the same tree gives the same bytes.
+	// Two names can have the same saved name, for example Color and Color3uint8. Write only the first one.
 	names := make([]string, 0, len(inst.Props))
 	for name := range inst.Props {
 		names = append(names, name)
@@ -218,11 +228,12 @@ func (b *builder) item(id protocol.Ref, depth int, parentPath string) error {
 	written := map[string]bool{}
 	for _, name := range names {
 		if name == "Name" {
-			continue // instance.Name is what the tree and the plugin use
+			// The tree and the plugin use instance.Name, not a Name property.
+			continue
 		}
 		element, saved, err := b.property(inst, name, inst.Props[name])
 		if err != nil {
-			// A script without its text isn't a smaller place, it's a broken one.
+			// A script without its text makes the place broken, so stop the build.
 			if name == "Source" {
 				return fmt.Errorf("%s: %w", path, err)
 			}
@@ -246,6 +257,7 @@ func (b *builder) item(id protocol.Ref, depth int, parentPath string) error {
 	return nil
 }
 
+// skip records that the instance at path lost a property, with the reason in message.
 func (b *builder) skip(message, path string) {
 	for _, s := range b.skipped {
 		if s.message == message {
@@ -256,6 +268,7 @@ func (b *builder) skip(message, path string) {
 	b.skipped = append(b.skipped, &skippedProp{message: message, first: path, count: 1})
 }
 
+// warnings returns one line for each skippedProp.
 func (b *builder) warnings() []string {
 	out := make([]string, len(b.skipped))
 	for i, s := range b.skipped {
@@ -268,16 +281,17 @@ func (b *builder) warnings() []string {
 	return out
 }
 
-// escape makes text safe inside an element or attribute. Unlike writing it by hand, it also
-// protects \r, which an XML reader would otherwise turn into \n.
+// escape makes text safe inside an element or an attribute.
+// It also escapes \r. Without this step, an XML reader changes \r into \n.
 func escape(text string) string {
 	var out strings.Builder
-	xml.EscapeText(&out, []byte(text)) // a strings.Builder can't fail
+	// The error is always nil, because a write to a strings.Builder cannot fail.
+	xml.EscapeText(&out, []byte(text))
 	return out.String()
 }
 
-// validText reports whether XML can hold text at all. xml.EscapeText replaces what it can't
-// hold, which would quietly change the text.
+// validText reports whether XML can hold text.
+// Do this check first, because xml.EscapeText replaces the characters that XML cannot hold, and gives no error.
 func validText(text string) bool {
 	if !utf8.ValidString(text) {
 		return false

@@ -49,7 +49,8 @@ func runMigration(t *testing.T, root string, args ...string) (string, error) {
 	t.Helper()
 	lune, script := migrationScript(t)
 	cmd := exec.Command(lune, append([]string{"run", script}, args...)...)
-	cmd.Dir = root // Exercise invoking the script outside the Verde checkout.
+	// Run the script from outside the Verde checkout.
+	cmd.Dir = root
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }

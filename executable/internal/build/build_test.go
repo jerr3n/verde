@@ -33,7 +33,7 @@ func wire(t string, v any) protocol.Value {
 	return protocol.Value{Type: t, Value: encoded}
 }
 
-// newTree makes a tree from instances, with the DataModel as "game".
+// newTree makes a tree from instances. The root is a DataModel with the name "game".
 func newTree(t *testing.T, instances ...protocol.Instance) *tree.Tree {
 	t.Helper()
 	out := tree.New(protocol.Instance{ID: "game", Name: "game", Class: "DataModel"})
@@ -206,7 +206,8 @@ func TestSameTreeGivesSameBytes(t *testing.T) {
 		)
 	}
 	first, _ := build(t, make())
-	for range 20 { // map order would differ somewhere in here
+	// Go map order is random. Thus 20 builds find output that depends on map order.
+	for range 20 {
 		if again, _ := build(t, make()); again != first {
 			t.Fatalf("output changed:\n%s\n---\n%s", first, again)
 		}
@@ -218,7 +219,8 @@ func TestAttributeBytesMatchTheFormatsExamples(t *testing.T) {
 	tests := []struct {
 		name  string
 		value protocol.Value
-		want  string // from https://dom.rojo.space/attributes
+		// want is the example from https://dom.rojo.space/attributes.
+		want string
 	}{
 		{"UDim", wire("UDim", []float64{123, 456}), "09 00 00 f6 42 c8 01 00 00"},
 		{"UDim2", wire("UDim2", []float64{1, 2, 3, 4}), "0a 00 00 80 3f 02 00 00 00 00 00 40 40 04 00 00 00"},
@@ -229,7 +231,7 @@ func TestAttributeBytesMatchTheFormatsExamples(t *testing.T) {
 			"17 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 3f 00 00 80 3f 00 00 00 3f 00 00 80 3f 00 00 80 3f"},
 		{"ColorSequence", wire("ColorSequence", [][]float64{{0, 1, 0, 0}, {0.5, 0, 1, 0}, {1, 0, 0, 1}}),
 			"19 03 00 00 00 00 00 00 00 00 00 00 00 00 00 80 3f 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 3f 00 00 00 00 00 00 80 3f 00 00 00 00 00 00 00 00 00 00 80 3f 00 00 00 00 00 00 00 00 00 00 80 3f"},
-		// The example has a CachedFaceId, which the wire format doesn't carry.
+		// The example has a CachedFaceId, but the wire format does not have that field.
 		{"Font", wire("Font", []string{"rbxasset://fonts/families/SourceSansPro.json", "Regular", "Normal"}), "21 " + font},
 	}
 	for _, test := range tests {
@@ -280,7 +282,7 @@ func TestWriteFile(t *testing.T) {
 	}
 }
 
-// everyType has a property of every wire type, on classes that really have them.
+// everyType has a property of each wire type, on classes that have that property in Roblox.
 func everyType() []protocol.Instance {
 	attributes := wire("Attributes", [][2]any{
 		{"ABool", wire("Bool", true)},
@@ -357,8 +359,8 @@ func everyType() []protocol.Instance {
 	}
 }
 
-// TestLuneReadsWhatWasBuilt is the real check: a place is only right if something else can
-// read it. Lune's reader is rbx-dom's, and the values go through the plugin's own encoder.
+// TestLuneReadsWhatWasBuilt is the most important check: a place is correct only if a different program can read it.
+// Lune uses the rbx-dom reader, and the values go through the encoder of the plugin.
 func TestLuneReadsWhatWasBuilt(t *testing.T) {
 	lune, err := exec.LookPath("lune")
 	if err != nil {
@@ -375,7 +377,7 @@ func TestLuneReadsWhatWasBuilt(t *testing.T) {
 		checkWithLune(t, lune, place, tr, tr.Children("game"), result)
 	})
 
-	// The Model holds Parts with every kind of value, and Refs that stay inside it.
+	// The Model holds Parts with each type of value, and Refs that point inside the Model.
 	t.Run("model", func(t *testing.T) {
 		tr := newTree(t, everyType()...)
 		model := filepath.Join(t.TempDir(), "Car.rbxmx")
@@ -387,7 +389,7 @@ func TestLuneReadsWhatWasBuilt(t *testing.T) {
 	})
 }
 
-// checkWithLune reads a built file and compares every instance under roots with the tree.
+// checkWithLune reads a built file with Lune, and compares each instance in roots and their descendants with the tree.
 func checkWithLune(t *testing.T, lune, file string, tr *tree.Tree, roots []protocol.Ref, result Result) {
 	t.Helper()
 	if len(result.Warnings) > 0 {
@@ -475,7 +477,7 @@ func checkWithLune(t *testing.T, lune, file string, tr *tree.Tree, roots []proto
 	}
 }
 
-// modelTree is a small game with the awkward cases for choosing what a model holds.
+// modelTree is a small game with the difficult cases for the choice of a model root.
 func modelTree(t *testing.T) (*tree.Tree, []protocol.Mount) {
 	t.Helper()
 	tr := newTree(t,
@@ -518,7 +520,7 @@ func TestModelHoldsOnlyItsInstance(t *testing.T) {
 		t.Errorf("Instances = %d, want 3", result.Instances)
 	}
 
-	// PrimaryPart stays inside the model, and Link's target doesn't.
+	// PrimaryPart points inside the model. The target of Link is outside the model.
 	match := regexp.MustCompile(`<Ref name="PrimaryPart">(RBX[0-9A-F]+)</Ref>`).FindStringSubmatch(text)
 	if match == nil || !strings.Contains(text, `<Item class="Part" referent="`+match[1]+`">`) {
 		t.Errorf("PrimaryPart doesn't point at Wheel:\n%s", text)
@@ -581,8 +583,8 @@ func TestChoosingWhatAModelHolds(t *testing.T) {
 	}
 }
 
-// sameValue compares wire values. Numbers can differ by what a 32-bit float or an 8-bit color
-// rounds them to. A ContentId is a String on one side and Content on the other.
+// sameValue compares wire values. Numbers can be different by the rounding of a 32-bit float or an 8-bit color.
+// A ContentId can be a String on one side and Content on the other side.
 func sameValue(want, got protocol.Value) error {
 	if want.Type != got.Type && !(want.Type == "String" && got.Type == "Content") {
 		return fmt.Errorf("got %s %s, want %s %s", got.Type, got.Value, want.Type, want.Value)
@@ -631,7 +633,7 @@ func closeEnough(a, b any) bool {
 	return a == b
 }
 
-// TestBuildsAProjectFromDisk runs the same steps as `verde build`.
+// TestBuildsAProjectFromDisk does the same steps as `verde build`.
 func TestBuildsAProjectFromDisk(t *testing.T) {
 	dir := t.TempDir()
 	files := map[string]string{

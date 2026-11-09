@@ -16,7 +16,7 @@ import (
 	"github.com/jerr3n/verde/executable/internal/tree"
 )
 
-// newConfig writes files and a project.yml to a temporary folder and loads the config.
+// newConfig writes files and a project.yml to a temporary folder, and then loads the config.
 func newConfig(t *testing.T, files map[string]string, yml string) *config.Cfg {
 	t.Helper()
 	dir := t.TempDir()
@@ -41,7 +41,7 @@ func newConfig(t *testing.T, files map[string]string, yml string) *config.Cfg {
 	return cfg
 }
 
-// byPath returns the tree's instances keyed by path, like "game/W/Main".
+// byPath returns the instances of the tree in a map. The key is the path, for example "game/W/Main".
 func byPath(tr *tree.Tree) map[string]protocol.Instance {
 	out := map[string]protocol.Instance{}
 	paths := map[protocol.Ref]string{}
@@ -109,7 +109,7 @@ func TestIsInit(t *testing.T) {
 }
 
 func TestNewRef(t *testing.T) {
-	// The same lowercase form the plugin generates for its own Refs.
+	// This is the same lowercase form that the plugin uses for its own refs.
 	form := regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 	first, second := newRef(), newRef()
 	if !form.MatchString(string(first)) {
@@ -227,7 +227,7 @@ sync:
 		}
 	}
 
-	// Every mount is in the tree, so a snapshot's instances include them.
+	// Each mount is in the tree. Thus the instances of a snapshot include the mounts.
 	if len(mounts) != 5 || tr.Len() != 5 {
 		t.Errorf("%d mounts and %d instances, want 5 of each", len(mounts), tr.Len())
 	}
@@ -257,7 +257,7 @@ func TestSampleConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The DataModel, StarterPlayer, and one for each of the sample's sync entries.
+	// The count is the DataModel, StarterPlayer, and one mount for each sync entry in the sample.
 	want := 2 + len(cfg.Sync.Instances)
 	if len(mounts) != want || tr.Len() != want {
 		t.Errorf("%d mounts and %d instances, want %d of each", len(mounts), tr.Len(), want)
@@ -326,7 +326,7 @@ func TestIgnore(t *testing.T) {
 	}
 }
 
-// An ignored init file doesn't make its folder a script.
+// An ignored init file does not make its folder a script.
 func TestIgnoredInitFile(t *testing.T) {
 	tr, _, err := Load(newConfig(t, map[string]string{"s/F/init.luau": ""}, syncW+`ignore: {paths: ["s/F/init.luau"]}`+"\n"))
 	if err != nil {
@@ -375,7 +375,7 @@ func TestLoadRejects(t *testing.T) {
 	}
 }
 
-// Different classes can share a name, the same as in Studio.
+// Instances of different classes can have the same name, as in Studio.
 func TestSameNameDifferentClass(t *testing.T) {
 	tr, _, err := Load(newConfig(t, map[string]string{"s/Foo.luau": "", "s/Foo.server.luau": "", "s/Foo/Bar.luau": ""}, syncW))
 	if err != nil {

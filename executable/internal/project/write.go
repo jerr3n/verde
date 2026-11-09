@@ -18,24 +18,27 @@ import (
 	"github.com/jerr3n/verde/executable/internal/tree"
 )
 
-// trashDir holds files that Studio deleted. It's outside every sync folder, so a scan
-// never reads it.
+// trashDir holds the files that Studio deleted. trashDir is outside each sync folder, so a scan never reads it.
 const trashDir = ".verde/trash"
 
-// blocked is why an instance can't have a file. Unlike a failed write, trying again
-// won't help until something else changes, like the sibling using its name going away.
+// blocked is the reason that an instance cannot have a file.
+// A failed write can succeed if Verde tries it again. A blocked instance cannot get a file until a different thing changes.
+// For example, the sibling that uses its name must go away first.
 type blocked string
 
+// Error returns the reason as text.
 func (b blocked) Error() string { return string(b) }
 
+// errParentNotOnDisk blocks an instance whose parent has no file or folder.
 const errParentNotOnDisk = blocked("its parent isn't on disk")
 
-// Apply makes a patch from Studio real: it updates the tree, then the files. It returns
-// the part of the patch that was applied, for forwarding, and what went wrong.
+// Apply applies a patch from Studio to the tree, and then writes the changes to the files.
+// It returns the part of the patch that it applied, so that the caller can send it to other clients.
+// It also returns an error for each change that failed.
 //
-// One bad change doesn't stop the rest, because the plugin has already made all of them
-// and doesn't undo any. An instance that can't get a file stays in the tree, marked
-// fileless, so that the next scan doesn't take the missing file as a deletion.
+// One bad change does not stop the other changes, because the plugin already made all of the changes and does not undo them.
+// If an instance cannot get a file, the instance stays in the tree and becomes fileless.
+// Thus the next scan does not see the missing file as a delete.
 func Apply(cfg *config.Cfg, t *tree.Tree, mounts []protocol.Mount, p protocol.Patch) (protocol.Patch, []error) {
 	root, err := os.OpenRoot(cfg.Root)
 	if err != nil {
@@ -57,8 +60,8 @@ func Apply(cfg *config.Cfg, t *tree.Tree, mounts []protocol.Mount, p protocol.Pa
 		w.dropUnneededTags()
 	}
 
-	// Reported only now, because a later change in the patch can clear the way. Swapping
-	// two names, or deleting a script and adding its replacement, isn't a problem.
+	// Report the fileless instances only at the end, because a later change in the patch can remove the problem.
+	// For example, a swap of two names is not a problem. A delete of a script followed by the add of its replacement is also not a problem.
 	for _, f := range w.newlyFileless {
 		if t.IsFileless(f.id) {
 			w.report(f.id, fmt.Errorf("not saved to disk: %w", f.err))
@@ -67,8 +70,8 @@ func Apply(cfg *config.Cfg, t *tree.Tree, mounts []protocol.Mount, p protocol.Pa
 	return w.applied, w.errs
 }
 
-// Locate finds an instance's files. Found is false if it has none, like a mount that's
-// only on the way to a sync target, or a fileless instance.
+// Locate finds the files of an instance. Found is false if the instance has no files.
+// Two examples are a mount that only holds a sync target, and a fileless instance.
 func Locate(cfg *config.Cfg, t *tree.Tree, mounts []protocol.Mount, id protocol.Ref) (protocol.Located, error) {
 	root, err := os.OpenRoot(cfg.Root)
 	if err != nil {
@@ -88,6 +91,7 @@ func Locate(cfg *config.Cfg, t *tree.Tree, mounts []protocol.Mount, id protocol.
 	return located, nil
 }
 
+// newWriter makes a writer for one Apply or Locate.
 func newWriter(cfg *config.Cfg, t *tree.Tree, mounts []protocol.Mount, root *os.Root) *writer {
 	w := &writer{
 		tree:     t,
@@ -110,44 +114,58 @@ func newWriter(cfg *config.Cfg, t *tree.Tree, mounts []protocol.Mount, root *os.
 	return w
 }
 
+// writer holds the state of one Apply or Locate.
 type writer struct {
-	tree     *tree.Tree
-	root     *os.Root
-	scan     *loader // shares the scan's rules for init files and ignores
-	mounts   map[protocol.Ref]bool
-	syncDirs map[protocol.Ref]string // sync mounts -> their folders
+	tree *tree.Tree
+	root *os.Root
+	// scan gives the writer the same rules for init files and ignores that Load uses.
+	scan   *loader
+	mounts map[protocol.Ref]bool
+	// syncDirs maps each sync target to its folder.
+	syncDirs map[protocol.Ref]string
 
-	applied       protocol.Patch
-	errs          []error
+	// applied is the part of the patch that Apply applied.
+	applied protocol.Patch
+	errs    []error
+	// newlyFileless holds each instance that became fileless during this patch, and the reason.
 	newlyFileless []filelessReason
-	tagged        []protocol.Ref // given a tag by this patch, since their name was taken
+	// tagged holds each instance that got a tag during this patch, because a sibling used its name.
+	tagged []protocol.Ref
 }
 
+// filelessReason is an instance and the error that made it fileless.
 type filelessReason struct {
 	id  protocol.Ref
 	err error
 }
 
-// where an instance is on disk, as /-separated paths from the project root
+// location is the place of an instance on disk.
+// Each path is relative to the project root and uses "/" as the separator.
 type location struct {
-	path  string // its file, or its folder if dir
-	file  string // file holding Source, "" if it isn't a script
-	props string // its .inst.json, which a script or folder may not have
-	dir   bool   // path is a folder its children go in
+	// path is the file of the instance. If dir is true, path is the folder of the instance.
+	path string
+	// file is the file that holds Source. file is "" if the instance is not a script.
+	file string
+	// props is the .inst.json file of the instance. A script or a folder can have no .inst.json file.
+	props string
+	// dir is true when path is a folder that holds the children of the instance.
+	dir bool
 }
 
+// report adds err to the errors, with the instance path of id as a prefix.
 func (w *writer) report(id protocol.Ref, err error) {
 	w.errs = append(w.errs, fmt.Errorf("%s: %w", w.instancePath(id), err))
 }
 
-// instancePath returns an instance's path without game/, like the config's paths. It's
-// also what ignore.instances is matched against.
+// instancePath returns the path of an instance without "game/", in the same form as the paths in the config.
+// ignore.instances uses this form too.
 func (w *writer) instancePath(id protocol.Ref) string {
 	var names []string
 	for {
 		inst, ok := w.tree.Get(id)
 		if !ok {
-			names = append(names, string(id)) // unknown Refs are named in error messages
+			// Put an unknown ref in the path, so that the error message shows it.
+			names = append(names, string(id))
 			break
 		}
 		if inst.Parent == "" {
@@ -166,8 +184,8 @@ func (w *writer) instancePath(id protocol.Ref) string {
 	return b.String()
 }
 
-// insideSync reports whether id is a sync target or inside one. The plugin only works
-// inside them, so anything else is a bug, and it shouldn't be allowed to touch files.
+// insideSync reports whether id is a sync target or is inside a sync target.
+// The plugin works only inside sync targets. A change at a different location is a bug, and it must not change files.
 func (w *writer) insideSync(id protocol.Ref) bool {
 	for id != "" {
 		if _, ok := w.syncDirs[id]; ok {
@@ -182,7 +200,7 @@ func (w *writer) insideSync(id protocol.Ref) bool {
 	return false
 }
 
-// checkSource drops a Source that isn't text, since it couldn't be written to a file.
+// checkSource removes a Source property that is not a String, because Verde cannot write it to a file.
 func (w *writer) checkSource(id protocol.Ref, class string, props map[string]protocol.Value) {
 	if value, ok := props["Source"]; ok && scriptSuffix(class) != "" && value.Type != "String" {
 		delete(props, "Source")
@@ -190,6 +208,7 @@ func (w *writer) checkSource(id protocol.Ref, class string, props map[string]pro
 	}
 }
 
+// add puts a new instance from Studio in the tree and on disk.
 func (w *writer) add(inst protocol.Instance) {
 	if !w.insideSync(inst.Parent) {
 		w.errs = append(w.errs, fmt.Errorf("%s: its parent isn't inside a sync target", inst.Name))
@@ -197,8 +216,8 @@ func (w *writer) add(inst protocol.Instance) {
 	}
 
 	w.checkSource(inst.ID, inst.Class, inst.Props)
-	// Every script has a file, so it has a Source. Without this, the next scan would
-	// find an empty Source the tree doesn't have and send it to Studio.
+	// Each script has a file, and thus has a Source. Without this step, the next scan
+	// finds an empty Source that is not in the tree, and sends it to Studio.
 	if _, ok := inst.Props["Source"]; !ok && scriptSuffix(inst.Class) != "" {
 		if inst.Props == nil {
 			inst.Props = map[string]protocol.Value{}
@@ -214,6 +233,7 @@ func (w *writer) add(inst protocol.Instance) {
 	w.place(inst.ID)
 }
 
+// update applies a change from Studio to the tree, and then moves or writes the files.
 func (w *writer) update(u protocol.Update) {
 	before, ok := w.tree.Get(u.ID)
 	if !ok {
@@ -230,7 +250,7 @@ func (w *writer) update(u protocol.Update) {
 	}
 	w.checkSource(u.ID, before.Class, u.Props)
 
-	// Has to come before the tree changes, because it follows the old names.
+	// Do this before the tree changes, because locate uses the old names.
 	old, wasOnDisk := w.locate(u.ID)
 
 	if err := w.tree.Update(u); err != nil {
@@ -244,8 +264,8 @@ func (w *writer) update(u protocol.Update) {
 		if !wasOnDisk {
 			w.place(u.ID)
 		} else if err := w.relocate(u.ID, old); err != nil {
-			// The file stayed where it was. Keeping the old place in the tree means the
-			// next scan still matches it, instead of seeing a new instance and a deletion.
+			// The file did not move. Put the old name and parent back in the tree.
+			// Then the next scan matches the file to the instance. It does not see a new instance and a delete.
 			w.report(u.ID, err)
 			revert := protocol.Update{ID: u.ID, Name: before.Name, Parent: before.Parent}
 			if err := w.tree.Update(revert); err != nil {
@@ -258,7 +278,7 @@ func (w *writer) update(u protocol.Update) {
 	if _, changed := u.Props["Source"]; changed && scriptSuffix(before.Class) != "" {
 		w.writeSource(u.ID)
 	}
-	// a move can land on a .inst.json left behind by a deleted script
+	// After a move, a .inst.json file from a deleted script can be at the new location. Write the props again.
 	if renamed || moved || changesSavedProps(before.Class, u.Props) {
 		w.saveProps(u.ID)
 	}
@@ -268,7 +288,7 @@ func (w *writer) update(u protocol.Update) {
 	}
 }
 
-// reports whether an update touches anything but a script's source
+// changesSavedProps reports whether props changes a property other than the Source of a script.
 func changesSavedProps(class string, props map[string]protocol.Value) bool {
 	for name := range props {
 		if name != "Source" || scriptSuffix(class) == "" {
@@ -278,9 +298,10 @@ func changesSavedProps(class string, props map[string]protocol.Value) bool {
 	return false
 }
 
-// relocate puts an instance's file or folder where the tree now says it belongs. A
-// folder is renamed whole, so files that aren't instances, like a README, go with it.
-// An error means nothing moved.
+// relocate moves the file or folder of an instance to the location that the tree now gives.
+// relocate renames a folder as one unit. Thus files that are not instances, such as a README, move with the folder.
+// If relocate returns an error, nothing moved.
+// If the instance is blocked at the new location, relocate moves the old files to the trash and makes the instance fileless.
 func (w *writer) relocate(id protocol.Ref, old location) error {
 	inst, _ := w.tree.Get(id)
 
@@ -311,8 +332,9 @@ func (w *writer) relocate(id protocol.Ref, old location) error {
 	return nil
 }
 
-// reports whether a script stored as one file has a .inst.json next to it, which has to move
-// with it. in a folder, it moves w/ the folder
+// hasSeparateProps reports whether a script stored as one file has a .inst.json file next to it.
+// That .inst.json file must move with the script.
+// A script stored as a folder keeps its .inst.json file in the folder, so the file moves with the folder.
 func (w *writer) hasSeparateProps(loc location) bool {
 	if loc.dir || loc.file == "" {
 		return false
@@ -321,7 +343,7 @@ func (w *writer) hasSeparateProps(loc location) bool {
 	return err == nil
 }
 
-// moves an instance's file or folder to the trash
+// trashLocation moves the file or folder at loc to the trash. It also moves a separate .inst.json file.
 func (w *writer) trashLocation(loc location) error {
 	separate := w.hasSeparateProps(loc)
 	if err := w.trash(loc.path); err != nil {
@@ -333,6 +355,7 @@ func (w *writer) trashLocation(loc location) error {
 	return nil
 }
 
+// relocateTarget returns the new path for an instance that moves from old.
 func (w *writer) relocateTarget(inst protocol.Instance, old location) (string, error) {
 	if err := w.checkAllowed(inst); err != nil {
 		return "", err
@@ -344,9 +367,11 @@ func (w *writer) relocateTarget(inst protocol.Instance, old location) (string, e
 	return w.chooseTarget(dir, inst, old.dir, old.path)
 }
 
-// picks the path for an instance's file, or folder if asDir. plain name if it's free, name
-// plus tag if not, and then the file holds the real name and id. current doesn't count as
-// taken
+// chooseTarget returns the path for the file of an instance in dir. If asDir is true, it returns the path for the folder.
+//   - If no sibling uses the encoded name, chooseTarget returns that name.
+//   - If a sibling uses the encoded name, chooseTarget adds the tag. The .inst.json file then holds the real name and the ref.
+//
+// current is the present path of the instance. chooseTarget does not count current as used.
 func (w *writer) chooseTarget(dir string, inst protocol.Instance, asDir bool, current string) (string, error) {
 	suffix := ""
 	if !asDir {
@@ -361,7 +386,8 @@ func (w *writer) chooseTarget(dir string, inst protocol.Instance, asDir bool, cu
 	if err := w.checkPath(plain); err != nil {
 		return "", err
 	}
-	// A case-only rename finds itself on a case-insensitive filesystem.
+	// On a case-insensitive file system, a rename that only changes the case finds the old file.
+	// That file is not a different sibling, so do not count it.
 	taken := false
 	if !strings.EqualFold(plain, current) {
 		if _, err := w.root.Lstat(plain); err == nil {
@@ -381,7 +407,7 @@ func (w *writer) chooseTarget(dir string, inst protocol.Instance, asDir bool, cu
 	if err := w.checkPath(tagged); err != nil {
 		return "", err
 	}
-	// its real name goes there, so scans have to be able to read it
+	// The .inst.json file holds the real name, so the scan must be able to read that file.
 	if err := w.checkPath(propsFileFor(tagged, inst.Class, asDir)); err != nil {
 		return "", err
 	}
@@ -392,7 +418,7 @@ func (w *writer) chooseTarget(dir string, inst protocol.Instance, asDir bool, cu
 	return tagged, nil
 }
 
-// .inst.json file of an instance stored at target
+// propsFileFor returns the path of the .inst.json file for an instance stored at target.
 func propsFileFor(target, class string, asDir bool) string {
 	switch {
 	case asDir:
@@ -403,8 +429,9 @@ func propsFileFor(target, class string, asDir bool) string {
 	return target
 }
 
-// reports whether a sibling of the same class has this name, ignoring case or as a folder,
-// which lstat can't see. Foo and foo are the same file on windows and macos
+// takenInOtherCase reports whether a sibling of the same class uses name with a different case, or uses name as a folder.
+// Lstat does not find these siblings.
+// This check is necessary because Foo and foo are the same file on Windows and macOS.
 func (w *writer) takenInOtherCase(dir, name, class, current string) bool {
 	entries, err := fs.ReadDir(w.scan.files, dir)
 	if err != nil {
@@ -429,8 +456,8 @@ func (w *writer) takenInOtherCase(dir, name, class, current string) bool {
 	return false
 }
 
-// moves instances tagged by this patch to their plain names, if those are free by now.
-// swapping two names, or replacing a script, only needs a tag halfway through
+// dropUnneededTags moves each instance that got a tag during this patch back to its plain name, if the name is free now.
+// For example, a swap of two names needs a tag only in the middle of the patch. A replacement of a script is the same.
 func (w *writer) dropUnneededTags() {
 	for _, id := range w.tagged {
 		if _, ok := w.tree.Get(id); !ok {
@@ -448,8 +475,9 @@ func (w *writer) dropUnneededTags() {
 	}
 }
 
-// remove handles a patch's removals. The plugin lists descendants too, in no particular
-// order, so only the top of each subtree touches the disk.
+// remove applies the removals in a patch.
+// The plugin also lists the descendants, in no specified order.
+// Thus remove changes the disk only for the highest removed instance in each subtree.
 func (w *writer) remove(ids []protocol.Ref) {
 	removing := make(map[protocol.Ref]bool, len(ids))
 	for _, id := range ids {
@@ -495,25 +523,26 @@ func (w *writer) remove(ids []protocol.Ref) {
 	}
 
 	for _, loc := range locations {
-		// The file stays, so the next scan brings the instance back. That undoes the
-		// user's delete, but it loses nothing, and they get this error to explain it.
+		// The file stays, so the next scan adds the instance again. This reverses the delete from Studio.
+		// No data is lost, and this error tells the user the reason.
 		if err := w.trashLocation(loc); err != nil {
 			w.errs = append(w.errs, fmt.Errorf("remove %s: %w", loc.path, err))
 		}
 	}
 }
 
-// retryFileless gives fileless instances another chance, since this patch may have
-// removed what was in the way. Each one's error was already reported.
+// retryFileless tries again to put each fileless instance on disk, because this patch may have removed the problem.
+// It does not report the errors again, because Verde already reported each one.
 func (w *writer) retryFileless() {
 	for _, id := range w.tree.Fileless() {
-		if w.tree.IsFileless(id) { // placing its parent may have placed it already
+		// If the parent was placed first, this instance can already be on disk.
+		if w.tree.IsFileless(id) {
 			w.place(id)
 		}
 	}
 }
 
-// place puts an instance and everything under it on disk, or marks it fileless.
+// place puts an instance and its descendants on disk. If that fails, place makes the instance fileless.
 func (w *writer) place(id protocol.Ref) {
 	inst, ok := w.tree.Get(id)
 	if !ok {
@@ -529,14 +558,17 @@ func (w *writer) place(id protocol.Ref) {
 	}
 }
 
+// markFileless makes id fileless, and records err for the report at the end of Apply.
 func (w *writer) markFileless(id protocol.Ref, err error) {
-	// Its parent's error already explains this, and a retry shouldn't repeat itself.
+	// Do not record errParentNotOnDisk, because the error of the parent already tells the reason.
+	// Do not record an instance that was already fileless, so that a retry does not report the same error again.
 	if !w.tree.IsFileless(id) && !errors.Is(err, errParentNotOnDisk) {
 		w.newlyFileless = append(w.newlyFileless, filelessReason{id, err})
 	}
 	w.tree.SetFileless(id, true)
 }
 
+// createOnDisk writes the file or folder for a new instance.
 func (w *writer) createOnDisk(inst protocol.Instance) error {
 	if err := w.checkAllowed(inst); err != nil {
 		return err
@@ -546,8 +578,8 @@ func (w *writer) createOnDisk(inst protocol.Instance) error {
 		return err
 	}
 
-	// A file can already be here if an earlier write failed, or if it was just created
-	// and hasn't been scanned yet. The tree wins, but the file's text goes to the trash.
+	// A file can already be at this location. An earlier write can have failed, or a person made the file before the scan.
+	// The tree wins, and replaceFile moves the old text to the trash.
 	if loc, found := w.find(dir, inst); found {
 		taken, err := w.claimedBySibling(dir, inst, loc)
 		if err != nil {
@@ -594,9 +626,11 @@ func (w *writer) createOnDisk(inst protocol.Instance) error {
 	return w.writeProps(inst, loc, w.replaceFile)
 }
 
-// reports whether a file w/ no id, found for a new instance, is really a same-named
-// sibling's. if so, it gets that sibling's id, so a later scan can tell them apart. a file
-// w/ no id always belongs to the only instance with its name and class
+// claimedBySibling reports whether a file without a stored ref belongs to a sibling of the new instance inst.
+// The sibling has the same name and class.
+// If the file belongs to the sibling, claimedBySibling writes the ref of the sibling into the file.
+// Thus a later scan can make the two instances different.
+// A file without a stored ref always belongs to the only instance with its name and class.
 func (w *writer) claimedBySibling(dir string, inst protocol.Instance, loc location) (bool, error) {
 	if w.readFileMeta(loc, inst.Class).ID != "" {
 		return false, nil
@@ -606,7 +640,7 @@ func (w *writer) claimedBySibling(dir string, inst protocol.Instance, loc locati
 		if id == inst.ID || other.Class != inst.Class || other.Name != inst.Name || w.tree.IsFileless(id) {
 			continue
 		}
-		// it has its own tagged file, so this one isn't its
+		// The sibling has its own tagged file, so this file does not belong to it.
 		if tagged := path.Join(dir, encodeName(other.Name)+tagFor(id)); w.exists(tagged) || w.exists(tagged+leafSuffix(other.Class)) {
 			continue
 		}
@@ -623,12 +657,13 @@ func (w *writer) claimedBySibling(dir string, inst protocol.Instance, loc locati
 	return false, nil
 }
 
+// exists reports whether name exists. It does not follow a symlink.
 func (w *writer) exists(name string) bool {
 	_, err := w.root.Lstat(name)
 	return err == nil
 }
 
-// what a location's .inst.json says, if it has one that can be read
+// readFileMeta returns the contents of the .inst.json file at loc. It returns an empty instFile if it cannot read the file.
 func (w *writer) readFileMeta(loc location, class string) instFile {
 	file, err := w.scan.readOptionalInst(loc.props, class)
 	if err != nil {
@@ -637,7 +672,7 @@ func (w *writer) readFileMeta(loc location, class string) instFile {
 	return file
 }
 
-// writes a file, trashing different text that's already there
+// replaceFile writes text to name. If name already holds different text, replaceFile first moves the old file to the trash.
 func (w *writer) replaceFile(name, text string) error {
 	if current, err := w.root.ReadFile(name); err == nil && string(current) != text {
 		if err := w.trash(name); err != nil {
@@ -647,16 +682,17 @@ func (w *writer) replaceFile(name, text string) error {
 	return w.writeFile(name, text)
 }
 
-// writes an instance's props to its .inst.json. marks it fileless on failure, or the next
-// scan would send the old values back over the change. skips mounts, service props aren't
-// synced
+// saveProps writes the properties of an instance to its .inst.json file.
+// If the write fails, saveProps makes the instance fileless. Without this step, the next scan sends the old values back over the change.
+// saveProps skips mounts, because Verde does not sync the properties of services.
 func (w *writer) saveProps(id protocol.Ref) {
 	if w.mounts[id] || w.tree.IsFileless(id) {
 		return
 	}
 	loc, onDisk := w.locate(id)
 	if !onDisk {
-		w.place(id) // its file is gone, so this makes a new one
+		// The file is gone, so place makes a new file.
+		w.place(id)
 		return
 	}
 	inst, _ := w.tree.Get(id)
@@ -665,9 +701,10 @@ func (w *writer) saveProps(id protocol.Ref) {
 	}
 }
 
-// writes the .inst.json at loc. a script or folder only has one if there's something to
-// store, and goes without if ignore.paths matches, since its other file says it exists.
-// anything else has nowhere else to exist
+// writeProps writes the .inst.json file at loc with write.
+//   - A script or a Folder gets a .inst.json file only if the file has data to store.
+//   - A script or a Folder has no .inst.json file if the path matches ignore.paths. Its other file or folder shows that it exists.
+//   - Each other instance always gets a .inst.json file, because that file is the only file of the instance.
 func (w *writer) writeProps(inst protocol.Instance, loc location, write func(name, text string) error) error {
 	stem := path.Base(loc.path)
 	if !loc.dir {
@@ -682,7 +719,9 @@ func (w *writer) writeProps(inst protocol.Instance, loc location, write func(nam
 	case strings.HasSuffix(stem, tagFor(inst.ID)):
 		file.ID = inst.ID
 	case w.readFileMeta(loc, inst.Class).ID != "" && w.hasTwin(inst):
-		file.ID = inst.ID // first of its name, siblings still need telling apart
+		// This instance has the plain name, but a sibling has the same name and class.
+		// Keep the stored ref, so that the scan can make the siblings different.
+		file.ID = inst.ID
 	}
 
 	optional := loc.file != "" || (loc.dir && inst.Class == "Folder")
@@ -700,7 +739,8 @@ func (w *writer) writeProps(inst protocol.Instance, loc location, write func(nam
 			} else if err != nil {
 				return err
 			}
-			return w.trash(loc.props) // the next scan would send its values to studio
+			// If the old file stays, the next scan sends its values to Studio.
+			return w.trash(loc.props)
 		}
 	}
 	text, err := encodeInst(file)
@@ -710,7 +750,7 @@ func (w *writer) writeProps(inst protocol.Instance, loc location, write func(nam
 	return write(loc.props, text)
 }
 
-// reports whether a sibling has the same name and class
+// hasTwin reports whether a sibling of inst has the same name and class.
 func (w *writer) hasTwin(inst protocol.Instance) bool {
 	for _, id := range w.tree.Children(inst.Parent) {
 		other, _ := w.tree.Get(id)
@@ -721,15 +761,17 @@ func (w *writer) hasTwin(inst protocol.Instance) bool {
 	return false
 }
 
-// writeSource writes an instance's Source to its file. If that fails, the instance is
-// marked fileless, or the next scan would send the file's old text back over the edit.
+// writeSource writes the Source of an instance to its file.
+// If the write fails, writeSource makes the instance fileless. Without this step, the next scan sends the old text back over the edit.
 func (w *writer) writeSource(id protocol.Ref) {
 	if w.tree.IsFileless(id) {
-		return // retryFileless writes it with the rest
+		// retryFileless writes the Source with the other fileless instances.
+		return
 	}
 	loc, onDisk := w.locate(id)
 	if !onDisk {
-		w.place(id) // its file is gone, so this makes a new one
+		// The file is gone, so place makes a new file.
+		w.place(id)
 		return
 	}
 	inst, _ := w.tree.Get(id)
@@ -742,7 +784,7 @@ func (w *writer) writeSource(id protocol.Ref) {
 	}
 }
 
-// checkAllowed checks the rules that don't depend on where the instance's file would go.
+// checkAllowed checks the rules that do not depend on the location of the file.
 func (w *writer) checkAllowed(inst protocol.Instance) error {
 	if inst.Name == "" {
 		return blocked("it has no name")
@@ -756,6 +798,7 @@ func (w *writer) checkAllowed(inst protocol.Instance) error {
 	return nil
 }
 
+// checkPath returns a blocked error if target matches ignore.paths.
 func (w *writer) checkPath(target string) error {
 	ignored, err := w.scan.pathIgnored(target)
 	if err != nil {
@@ -767,6 +810,7 @@ func (w *writer) checkPath(target string) error {
 	return nil
 }
 
+// checkFree returns a blocked error if target already exists.
 func (w *writer) checkFree(target string) error {
 	if _, err := w.root.Lstat(target); err == nil {
 		return blocked(target + " already exists")
@@ -776,8 +820,8 @@ func (w *writer) checkFree(target string) error {
 	return nil
 }
 
-// locate finds an instance on disk from the tree and what's in each folder. There's no
-// stored mapping that could go stale when someone changes the files themselves.
+// locate finds an instance on disk from the tree and from the contents of each folder.
+// Verde does not store a map from instances to files, because such a map becomes wrong when a person changes the files.
 func (w *writer) locate(id protocol.Ref) (location, bool) {
 	if dir, ok := w.syncDirs[id]; ok {
 		return location{path: dir, dir: true}, true
@@ -796,9 +840,9 @@ func (w *writer) locate(id protocol.Ref) (location, bool) {
 	return w.search(parent.path, inst)
 }
 
-// looks through a folder for an instance by its tag or name. decodes each entry instead of
-// checking one encoded path, since a file from outside verde may hold a character
-// encodeName would've escaped, like What?.luau
+// find looks in dir for the file of an instance, by its tag or by its name.
+// find decodes each entry. It does not check only the encoded path,
+// because a file from outside Verde can hold a character that encodeName encodes, for example What?.luau.
 func (w *writer) find(dir string, inst protocol.Instance) (location, bool) {
 	entries, err := fs.ReadDir(w.scan.files, dir)
 	if err != nil {
@@ -820,7 +864,7 @@ func (w *writer) find(dir string, inst protocol.Instance) (location, bool) {
 		if !ok || !w.holds(loc, stem, inst) {
 			continue
 		}
-		// its own tag beats a file w/ its name, which may be a sibling's
+		// A file with the tag of the instance wins over a file with its name, because the named file can belong to a sibling.
 		if tagged {
 			return loc, true
 		}
@@ -829,9 +873,8 @@ func (w *writer) find(dir string, inst protocol.Instance) (location, bool) {
 	return named, foundNamed
 }
 
-// find for a file whose name says nothing about what's in it, because someone renamed it.
-// opens every file of the class, so it's only for when find came up empty and the instance
-// should have a file
+// search looks in dir for a file that a person renamed, so that its name does not identify the instance.
+// search opens each file of the class. Thus use it only when find fails and the instance must have a file.
 func (w *writer) search(dir string, inst protocol.Instance) (location, bool) {
 	entries, err := fs.ReadDir(w.scan.files, dir)
 	if err != nil {
@@ -849,8 +892,8 @@ func (w *writer) search(dir string, inst protocol.Instance) (location, bool) {
 	return location{}, false
 }
 
-// an entry's name without its suffix, if it could hold an instance of class. a folder
-// could, depending on its init
+// entryStem returns the name of entry without its suffix. ok is false if entry cannot hold an instance of class.
+// A folder can hold any class, because its init file sets the class.
 func entryStem(entry fs.DirEntry, class string) (string, bool) {
 	switch {
 	case entry.IsDir():
@@ -865,7 +908,7 @@ func entryStem(entry fs.DirEntry, class string) (string, bool) {
 	return name, ok && found == class && name != "init"
 }
 
-// where an instance of class is, given the entry holding it
+// entryLocation returns the location of an instance of class that is stored in entry. ok is false if a folder has a different class.
 func (w *writer) entryLocation(dir string, entry fs.DirEntry, class string) (location, bool) {
 	full := path.Join(dir, entry.Name())
 	isScript := scriptSuffix(class) != ""
@@ -886,9 +929,9 @@ func (w *writer) entryLocation(dir string, entry fs.DirEntry, class string) (loc
 	return location{path: full, props: full}, true
 }
 
-// reports whether the file at loc is this instance's. there's no stored mapping, so this
-// goes by its id, or its name if it has none. an id that's not in the tree means someone
-// edited the file, so the name decides
+// holds reports whether the file at loc belongs to inst.
+// Verde does not store a map from instances to files. Thus holds uses the stored ref, or the name if there is no stored ref.
+// If the stored ref is not in the tree, a person edited the file. Then the name decides.
 func (w *writer) holds(loc location, stem string, inst protocol.Instance) bool {
 	file := w.readFileMeta(loc, inst.Class)
 	if file.ID == inst.ID {
@@ -899,7 +942,7 @@ func (w *writer) holds(loc location, stem string, inst protocol.Instance) bool {
 			return false
 		}
 	}
-	// its own tag, on a file that's been renamed but has no .inst.json yet
+	// The file has the tag of the instance, but has no .inst.json file yet.
 	if strings.HasSuffix(stem, tagFor(inst.ID)) {
 		return true
 	}
@@ -910,8 +953,8 @@ func (w *writer) holds(loc location, stem string, inst protocol.Instance) bool {
 	return name == inst.Name
 }
 
-// returns the folder an instance's children go in, creating it if needed. Foo.luau becomes
-// Foo/init.luau the first time, and Lamp.Part.inst.json becomes Lamp/init.Part.inst.json
+// childDir returns the folder for the children of an instance. If the folder does not exist, childDir makes it.
+// For the first child, Foo.luau becomes Foo/init.luau, and Lamp.Part.inst.json becomes Lamp/init.Part.inst.json.
 func (w *writer) childDir(id protocol.Ref) (string, error) {
 	if dir, ok := w.syncDirs[id]; ok {
 		return dir, w.root.MkdirAll(dir, 0o755)
@@ -927,8 +970,8 @@ func (w *writer) childDir(id protocol.Ref) (string, error) {
 	inst, _ := w.tree.Get(id)
 	suffix := leafSuffix(inst.Class)
 	dir := strings.TrimSuffix(loc.path, suffix)
-	// Foo/ may belong to a Folder or another script called Foo. merging them would change
-	// what the scan reads, so this one gets its own folder
+	// Foo/ can belong to a Folder or to a different script with the name Foo.
+	// A merge of the two folders changes what the scan reads, so this instance gets its own folder.
 	if tag := tagFor(id); w.exists(dir) && !strings.HasSuffix(dir, tag) {
 		dir += tag
 	}
@@ -964,7 +1007,7 @@ func (w *writer) childDir(id protocol.Ref) (string, error) {
 	if loc.file != "" {
 		moved.file = init
 	}
-	// a tag means the name doesn't match anymore, so the file has to say what it is
+	// With a tag, the folder name is not the instance name. The .inst.json file must hold the name and the ref.
 	if strings.HasSuffix(dir, tagFor(id)) {
 		if err := w.writeProps(inst, moved, w.writeFile); err != nil {
 			return "", err
@@ -973,10 +1016,10 @@ func (w *writer) childDir(id protocol.Ref) (string, error) {
 	return dir, nil
 }
 
-// writeFile replaces a file's contents all at once, by writing a temporary file and
-// renaming it, so that a crash can't leave half a script. It leaves an unchanged file
-// alone, so editors don't think it changed. The temporary name isn't a script, so a
-// scan skips one left behind by a crash.
+// writeFile replaces the contents of a file in one step. It writes a temporary file and then renames it.
+// Thus a crash cannot leave a script that is only half written.
+//   - If the text is the same, writeFile does not touch the file. Thus editors do not see a change.
+//   - The temporary name is not a script name. Thus a scan skips a temporary file that stays after a crash.
 func (w *writer) writeFile(name, text string) error {
 	if current, err := w.root.ReadFile(name); err == nil && string(current) == text {
 		return nil
@@ -1008,16 +1051,16 @@ func (w *writer) writeFile(name, text string) error {
 	return err
 }
 
-// trash moves a file or folder into the trash instead of deleting it, because a delete
-// from Studio can destroy work that was never committed.
+// trash moves a file or folder into the trash. It does not delete it,
+// because a delete from Studio can destroy work that is not in a commit.
 func (w *writer) trash(name string) error {
 	if err := w.root.MkdirAll(trashDir, 0o755); err != nil {
 		return err
 	}
-	// Keeps deleted scripts out of git without the project needing to do anything.
+	// This file keeps the deleted scripts out of git. The project does not need to change its own .gitignore.
 	w.root.WriteFile(path.Join(trashDir, ".gitignore"), []byte("*\n"), 0o644)
 
-	// Each call gets its own folder, so the same path can be trashed more than once.
+	// Each call gets its own folder. Thus the same path can go to the trash more than one time.
 	target := path.Join(trashDir, time.Now().UTC().Format("20060102-150405.000000000"), name)
 	if err := w.root.MkdirAll(path.Dir(target), 0o755); err != nil {
 		return err
@@ -1025,7 +1068,7 @@ func (w *writer) trash(name string) error {
 	return w.root.Rename(name, target)
 }
 
-// sourceText returns a script's Source as text.
+// sourceText returns the Source of a script as text. It returns "" if the instance has no Source.
 func sourceText(inst protocol.Instance) (string, error) {
 	value, ok := inst.Props["Source"]
 	if !ok {

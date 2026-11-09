@@ -7,11 +7,12 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// New builds a zap logging. In debug mode it writes coloured, human-readable
-// console output at Debug level; otherwise it writes JSON at Info level.
+// New makes the logger for the server.
+// In debug mode, the logger writes colored console text at the Debug level.
+// In other modes, the logger writes JSON at the Info level.
 //
-// Automatic stack traces are off: they would only point at the middleware.
-// Recovery adds a real stack trace to panic logs itself.
+// Automatic stack traces are off because they always point at the logging middleware.
+// Recovery adds the correct stack trace to each panic log.
 func New(debug bool) (*zap.Logger, error) {
 	if debug {
 		cfg := zap.NewDevelopmentConfig()

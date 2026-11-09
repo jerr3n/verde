@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
+// Package session connects the WebSocket clients to the project tree and to the disk.
+// One goroutine, Run, owns the tree and the client list. Other goroutines send events to Run.
 package session
 
 import (
@@ -18,17 +20,22 @@ import (
 	"go.uber.org/zap"
 )
 
+// protocolVersion is the version that a client must send in Hello.
 const protocolVersion = 1
 
-// client is one connected plugin.
+// client is one WebSocket connection, from a Studio plugin or from an editor.
 type client struct {
-	conn  *websocket.Conn
-	queue chan protocol.Envelope // messages waiting for the writer goroutine
-	seq   int64                  // last seq sent. Only the writer goroutine touches this
+	conn *websocket.Conn
+	// queue holds the messages that writeLoop did not send yet.
+	queue chan protocol.Envelope
+	// seq is the Seq of the last message that writeLoop sent. Only writeLoop uses seq.
+	seq int64
 
-	editor bool // said hello as protocol.RoleEditor. Only Run touches this
+	// editor is true when the Hello had the role protocol.RoleEditor. Only Run uses editor.
+	editor bool
 }
 
+// eventKind is the type of an event.
 type eventKind int
 
 const (
@@ -37,24 +44,30 @@ const (
 	EventDiskChanged
 )
 
-// event is something a connection asks Run to handle.
+// event is a request to Run from a connection or from the disk watcher.
 type event struct {
 	kind   eventKind
 	client *client
-	data   []byte // only set for eventMessage
+	// data is the raw message. data is set only for eventMessage.
+	data []byte
 }
 
+// session is the state that Run owns. Make a session with New.
 type session struct {
 	cfg    *config.Cfg
 	t      *tree.Tree
 	mounts []protocol.Mount
 	logger *zap.Logger
 
-	clients map[*client]struct{} // clients that have completed hello. Only Run touches this
-	events  chan event           // connections send their events to Run here
-	done    chan struct{}        // closed when Run exits
+	// clients holds each client that completed Hello. Only Run uses clients.
+	clients map[*client]struct{}
+	// events carries the events from the connections and the watcher to Run.
+	events chan event
+	// done closes when Run returns.
+	done chan struct{}
 }
 
+// New makes a session for the project tree t. Start Run before you call Handle or DiskChanged.
 func New(cfg *config.Cfg, t *tree.Tree, mounts []protocol.Mount, logger *zap.Logger) *session {
 	return &session{
 		cfg:    cfg,
@@ -68,6 +81,9 @@ func New(cfg *config.Cfg, t *tree.Tree, mounts []protocol.Mount, logger *zap.Log
 	}
 }
 
+// send puts a message in the queue of c. send does not wait.
+// If the queue is full, send closes the connection and returns an error.
+// A slow client thus cannot stop Run.
 func (c *client) send(msgType string, data any) error {
 	encoded, err := json.Marshal(data)
 	if err != nil {
@@ -79,11 +95,13 @@ func (c *client) send(msgType string, data any) error {
 	case c.queue <- e:
 		return nil
 	default:
-		c.conn.CloseNow() // best option
+		// The client cannot get all of its messages, so close the connection.
+		c.conn.CloseNow()
 		return errors.New("client queue is full")
 	}
 }
 
+// sendError sends an Error message that refers to the request seq.
 func (c *client) sendError(seq int64, msg string) error {
 	err := c.send("error", protocol.Error{
 		Seq:     seq,
@@ -92,6 +110,8 @@ func (c *client) sendError(seq int64, msg string) error {
 	return err
 }
 
+// writeLoop sends each message from the queue, and gives each message the next Seq.
+// writeLoop closes the connection when it returns.
 func (c *client) writeLoop(ctx context.Context) error {
 	defer c.conn.CloseNow()
 	for {
@@ -115,6 +135,8 @@ func (c *client) writeLoop(ctx context.Context) error {
 	}
 }
 
+// Run handles the events from the connections and the watcher, one at a time.
+// Run returns when ctx is done.
 func (s *session) Run(ctx context.Context) error {
 	defer close(s.done)
 
@@ -139,6 +161,8 @@ func (s *session) Run(ctx context.Context) error {
 	}
 }
 
+// handleMessage decodes one message from c and sends it to its handler.
+// Each message type except "hello" needs a completed Hello first.
 func (s *session) handleMessage(c *client, data []byte) {
 	var env protocol.Envelope
 	if err := json.Unmarshal(data, &env); err != nil {
@@ -168,12 +192,14 @@ func (s *session) handleMessage(c *client, data []byte) {
 		}
 		s.handleLocate(c, env)
 	case "ack", "error":
-		// Nothing to do for now.
+		// The server does not use these messages yet.
 	default:
 		c.sendError(env.Seq, "unknown message type: "+env.Type)
 	}
 }
 
+// handleHello checks the protocol version and the place ID, and sends a Snapshot to c.
+// c becomes a registered client only after the Snapshot is in its queue.
 func (s *session) handleHello(c *client, e protocol.Envelope) {
 	var hello protocol.Hello
 	if err := json.Unmarshal(e.Data, &hello); err != nil {
@@ -216,6 +242,7 @@ func (s *session) handleHello(c *client, e protocol.Envelope) {
 	}
 }
 
+// status counts the connected Studio plugins.
 func (s *session) status() protocol.Status {
 	var status protocol.Status
 	for c := range s.clients {
@@ -226,7 +253,7 @@ func (s *session) status() protocol.Status {
 	return status
 }
 
-// sendStatus tells every editor what's connected. Plugins don't know this message.
+// sendStatus sends the Status to each editor. It does not send Status to plugins, because plugins do not know this message.
 func (s *session) sendStatus() {
 	status := s.status()
 	for c := range s.clients {
@@ -239,6 +266,7 @@ func (s *session) sendStatus() {
 	}
 }
 
+// handleLocate replies to a Locate with a Located message.
 func (s *session) handleLocate(c *client, e protocol.Envelope) {
 	var locate protocol.Locate
 	if err := json.Unmarshal(e.Data, &locate); err != nil {
@@ -256,9 +284,10 @@ func (s *session) handleLocate(c *client, e protocol.Envelope) {
 	}
 }
 
-// handlePatch applies a patch from a plugin to the tree and disk, then forwards what
-// was applied to the other plugins. The sender already has these changes, and the
-// rescan its file writes cause finds nothing different, so nothing echoes back.
+// handlePatch applies a patch from c to the tree and to the disk.
+// It then sends the applied part of the patch to each other client.
+// It sends nothing back to c, because c already has the changes.
+// The file writes cause a rescan, but the rescan finds no difference, so the changes do not return to c.
 func (s *session) handlePatch(c *client, e protocol.Envelope) {
 	var patch protocol.Patch
 	if err := json.Unmarshal(e.Data, &patch); err != nil {
@@ -285,6 +314,8 @@ func (s *session) handlePatch(c *client, e protocol.Envelope) {
 	}
 }
 
+// handleDiskChange scans the disk again and sends the difference to each client.
+// If the scan fails, the current tree stays the same.
 func (s *session) handleDiskChange() {
 	next, _, err := project.Load(s.cfg)
 	if err != nil {
@@ -308,17 +339,19 @@ func (s *session) handleDiskChange() {
 		}
 	}
 
-	// A file this removed may have been what kept an instance fileless.
+	// The patch may have removed the file that made an instance fileless.
+	// An empty Apply tries the writes for the fileless instances again.
 	if _, errs := project.Apply(s.cfg, s.t, s.mounts, protocol.Patch{}); len(errs) > 0 {
 		s.logger.Warn("retry writes", zap.Errors("errors", errs))
 	}
 }
 
+// DiskChanged tells Run to scan the disk again. The watcher calls DiskChanged.
 func (s *session) DiskChanged() {
 	s.post(event{kind: EventDiskChanged})
 }
 
-// post hands an event to run, waiting until Run takes it or has exited.
+// post gives ev to Run. post waits until Run takes ev or until Run returns.
 func (s *session) post(ev event) {
 	select {
 	case s.events <- ev:
@@ -327,6 +360,8 @@ func (s *session) post(ev event) {
 	}
 }
 
+// Handle serves one WebSocket connection until the connection closes or ctx is done.
+// Handle returns nil after a normal close from the client.
 func (s *session) Handle(ctx context.Context, conn *websocket.Conn) error {
 	conn.SetReadLimit(64 << 20)
 	c := &client{

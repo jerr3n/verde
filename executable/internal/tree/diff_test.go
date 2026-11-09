@@ -14,8 +14,8 @@ func source(s string) map[string]protocol.Value {
 	return map[string]protocol.Value{"Source": str(s)}
 }
 
-// buildTree makes a tree with the given root Ref. Scans get new Refs every time, so
-// tests give the current tree and the scan different ones.
+// buildTree makes a tree with the given root ref.
+// Each scan gives new refs. Thus tests give different refs to the current tree and to the scan.
 func buildTree(t *testing.T, root Ref, insts ...protocol.Instance) *Tree {
 	t.Helper()
 	tr := New(protocol.Instance{ID: root, Name: "game", Class: "DataModel"})
@@ -27,7 +27,7 @@ func buildTree(t *testing.T, root Ref, insts ...protocol.Instance) *Tree {
 	return tr
 }
 
-// shape describes a tree without its Refs, so trees from different scans can be compared.
+// shape describes a tree without its refs, so that a test can compare trees from different scans.
 func shape(tr *Tree) []string {
 	paths := map[Ref]string{}
 	var out []string
@@ -88,8 +88,8 @@ func TestDiffNewScriptInNewFolder(t *testing.T) {
 		protocol.Instance{ID: "util2", Parent: "lib2", Name: "Util", Class: "ModuleScript", Props: source("a")},
 	)
 
-	// The folder comes first and points at the Ref the plugin already knows. The script
-	// points at the folder, which is new in the same patch.
+	// The folder comes first, and its parent is a ref that the plugin already knows.
+	// The parent of the script is the folder, which is new in the same patch.
 	assertPatch(t, Diff(cur, next), protocol.Patch{
 		Added: []protocol.Instance{
 			{ID: "lib2", Parent: "rs", Name: "lib", Class: "Folder"},
@@ -110,7 +110,7 @@ func TestDiffScriptRemoved(t *testing.T) {
 	assertPatch(t, Diff(cur, next), protocol.Patch{Removed: []Ref{"util"}})
 }
 
-// Removing a Ref removes its subtree, so only the top of a removed folder is listed.
+// A removed ref also removes its subtree. Thus the patch lists only the top of a removed folder.
 func TestDiffFolderRemovedListsOnlyTop(t *testing.T) {
 	cur := buildTree(t, "game",
 		protocol.Instance{ID: "rs", Parent: "game", Name: "ReplicatedStorage", Class: "ReplicatedStorage"},
@@ -140,7 +140,7 @@ func TestDiffClassChangeReplacesInstance(t *testing.T) {
 	})
 }
 
-// every class has a file now, so not finding a part means it was deleted
+// Each class has a file now. Thus a missing part file means that the part was deleted.
 func TestDiffRemovesAnyClassGoneFromDisk(t *testing.T) {
 	cur := buildTree(t, "game",
 		protocol.Instance{ID: "rs", Parent: "game", Name: "ReplicatedStorage", Class: "ReplicatedStorage"},
@@ -153,7 +153,7 @@ func TestDiffRemovesAnyClassGoneFromDisk(t *testing.T) {
 	assertPatch(t, Diff(cur, next), protocol.Patch{Removed: []Ref{"part"}})
 }
 
-// a scan can't see refs, so they aren't removed or sent
+// A scan does not find properties of type Ref, so Diff does not remove or send them.
 func TestDiffKeepsPropsNotOnDisk(t *testing.T) {
 	props := source("a")
 	props["PrimaryPart"] = protocol.Value{Type: "Ref", Value: []byte(`"some-ref"`)}
@@ -169,7 +169,7 @@ func TestDiffKeepsPropsNotOnDisk(t *testing.T) {
 	assertPatch(t, Diff(cur, next), protocol.Patch{})
 }
 
-// Studio's JSON may escape text differently from Go's. That isn't a real change.
+// The JSON from Studio can escape text differently from the JSON from Go. That is not a real change.
 func TestDiffIgnoresStringEscaping(t *testing.T) {
 	cur := buildTree(t, "game",
 		protocol.Instance{ID: "rs", Parent: "game", Name: "ReplicatedStorage", Class: "ReplicatedStorage"},
@@ -187,8 +187,8 @@ func TestDiffIgnoresStringEscaping(t *testing.T) {
 	assertPatch(t, Diff(cur, next), protocol.Patch{})
 }
 
-// a file can hold the same value in different json. treating that as a change would send
-// an update to studio on every scan
+// A file can hold the same value in different JSON text.
+// If Diff sees that as a change, each scan sends an update to Studio.
 func TestDiffIgnoresValueFormatting(t *testing.T) {
 	sameValues := []struct{ a, b string }{
 		{`[1,2,3]`, `[1, 2, 3]`},
@@ -215,7 +215,7 @@ func TestDiffIgnoresValueFormatting(t *testing.T) {
 	}
 }
 
-// Applying a patch should leave the tree matching the scan, with nothing left to send.
+// After Apply, the tree must match the scan, and a second Diff must find nothing to send.
 func TestDiffApplyConverges(t *testing.T) {
 	cur := buildTree(t, "game",
 		protocol.Instance{ID: "rs", Parent: "game", Name: "ReplicatedStorage", Class: "ReplicatedStorage"},

@@ -20,28 +20,32 @@ import (
 	"github.com/jerr3n/verde/executable/internal/protocol"
 )
 
-// ends files that store instances. more specific than .json, so package.lock.json isn't
-// read as an instance of class "lock"
+// instSuffix is the end of the name of each file that stores an instance.
+// The suffix is longer than ".json". Thus Verde does not read package.lock.json as an instance of the class "lock".
 const instSuffix = ".inst.json"
 
-// what a .inst.json file holds. name and class are in the file name, unless the name was
-// taken. then the real name goes here, w/ an id to tell the siblings apart
+// instFile is the contents of a .inst.json file.
+// The file name usually holds the name and the class of the instance.
+// If a sibling already uses the file name, Name holds the real name, and ID makes the siblings different.
 type instFile struct {
 	ID    protocol.Ref              `json:"id,omitempty"`
 	Name  string                    `json:"name,omitempty"`
 	Props map[string]protocol.Value `json:"props,omitempty"`
 }
 
-// what's added to a file name when the name is taken, like Part~3f9a1c2e7b04. it's from the
-// ref and not a counter, so deleting a sibling doesn't rename the others. hashed since a ref
-// comes from the client and could hold anything. 50k same-named parts in one folder have
-// about a 1 in 200k chance of a clash
+// tagFor returns the text that Verde adds to a file name when a sibling already uses the name.
+// An example is Part~3f9a1c2e7b04.
+//   - The tag comes from the ref, not from a counter. Thus a deleted sibling does not cause a rename of the other siblings.
+//   - The tag is a hash, because a ref comes from the client and can hold any text.
+//   - With 50,000 parts of the same name in one folder, the chance of two equal tags is approximately 1 in 200,000.
 func tagFor(id protocol.Ref) string {
 	sum := sha256.Sum256([]byte(id))
 	return "~" + hex.EncodeToString(sum[:6])
 }
 
-// reports whether a class is safe in a file name. dots would mix up the name and class
+// validClass reports whether class is safe in a file name.
+// A valid class has only ASCII letters, digits, and "_", and does not start with a digit.
+// A dot is not permitted, because a dot separates the name and the class.
 func validClass(class string) bool {
 	if class == "" || (class[0] >= '0' && class[0] <= '9') {
 		return false
@@ -55,8 +59,9 @@ func validClass(class string) bool {
 	return true
 }
 
-// splits Lamp.Part.inst.json into name and class. class is after the last dot, since names
-// can hold dots. name stays as it is on disk, so init isn't mixed up w/ an encoded %69nit
+// classifyInst splits a file name such as Lamp.Part.inst.json into a name and a class.
+// The class comes after the last dot, because a name can hold dots.
+// classifyInst does not decode the name. Thus "init" stays different from the encoded name "%69nit".
 func classifyInst(filename string) (name, class string, ok bool) {
 	stem, found := strings.CutSuffix(filename, instSuffix)
 	if !found {
@@ -69,14 +74,14 @@ func classifyInst(filename string) (name, class string, ok bool) {
 	return stem[:dot], stem[dot+1:], true
 }
 
-// reports whether a file gives its folder a class, like init.luau does. a script's
-// .inst.json doesn't, it only adds to the script next to it
+// isInstInit reports whether a .inst.json file sets the class of its folder, as init.luau does.
+// The .inst.json file of a script does not set the class. It only adds properties to the script.
 func isInstInit(filename string) bool {
 	name, class, ok := classifyInst(filename)
 	return ok && name == "init" && scriptSuffix(class) == ""
 }
 
-// class of a folder, from its init file
+// initClass returns the class that the init file gives to its folder. With no init file, the class is Folder.
 func initClass(init string) string {
 	if _, class, ok := classify(init); ok {
 		return class
@@ -87,7 +92,7 @@ func initClass(init string) string {
 	return "Folder"
 }
 
-// what follows the name of an instance with no children
+// leafSuffix returns the file suffix for an instance that has no children and thus is stored as one file.
 func leafSuffix(class string) string {
 	if suffix := scriptSuffix(class); suffix != "" {
 		return suffix
@@ -95,18 +100,19 @@ func leafSuffix(class string) string {
 	return "." + class + instSuffix
 }
 
-// .inst.json file of an instance stored as a folder
+// initProps returns the path of the .inst.json file for an instance that is stored as the folder dir.
 func initProps(dir, class string) string {
 	return path.Join(dir, "init."+class+instSuffix)
 }
 
-// .inst.json file next to a script stored as one file
+// scriptProps returns the path of the .inst.json file next to the script file.
 func scriptProps(file, class string) string {
 	return strings.TrimSuffix(file, scriptSuffix(class)) + "." + class + instSuffix
 }
 
-// props that go in a .inst.json file. source has its own file, and refs change on every
-// load, so those stay in the tree until the server restarts
+// savedProps returns the properties that go in a .inst.json file. It removes two types of properties:
+//   - The Source of a script, because Source has its own file.
+//   - Each property of type Ref, because refs change on each load. These properties stay only in the tree, until the server stops.
 func savedProps(inst protocol.Instance) map[string]protocol.Value {
 	out := make(map[string]protocol.Value, len(inst.Props))
 	for name, value := range inst.Props {
@@ -118,13 +124,13 @@ func savedProps(inst protocol.Instance) map[string]protocol.Value {
 	return out
 }
 
-// one prop per line, sorted, so the same instance gives the same bytes and a change is a
-// one-line diff
+// encodeInst writes file as JSON with one property on each line, in sorted order.
+// Thus the same instance always gives the same bytes, and a change to one property changes one line.
 func encodeInst(file instFile) (string, error) {
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)
 	enc.SetEscapeHTML(false)
-	// Encode ends w/ a newline, which has to go so a comma can follow
+	// Encode adds a newline at the end. Remove the newline, so that a comma can come next.
 	encode := func(v any) error {
 		if err := enc.Encode(v); err != nil {
 			return err
@@ -176,14 +182,16 @@ func encodeInst(file instFile) (string, error) {
 	if b.Len() == 0 {
 		return "{}\n", nil
 	}
-	// load refuses invalid text, so this would stop the whole project loading
+	// Load refuses text that is not valid UTF-8. Thus this file would stop the load of the full project.
 	if !utf8.Valid(b.Bytes()) {
 		return "", errors.New("properties are not valid UTF-8")
 	}
 	return "{\n" + b.String() + "\n}\n", nil
 }
 
-// strict on purpose: a typo that dropped a prop would send the wrong state to studio
+// decodeInst reads the text of a .inst.json file for an instance of the given class.
+// It refuses unknown fields and other small errors.
+// This is intentional: if a typo causes Verde to ignore a property, Studio gets the wrong state.
 func decodeInst(text []byte, class string) (instFile, error) {
 	if !utf8.Valid(text) {
 		return instFile{}, errors.New("not valid UTF-8")
@@ -212,7 +220,7 @@ func decodeInst(text []byte, class string) (instFile, error) {
 	return file, nil
 }
 
-// reads the .inst.json of an instance that has to have one
+// readInst reads the .inst.json file at full. The file must exist.
 func (l *loader) readInst(full, class string) (instFile, error) {
 	text, err := fs.ReadFile(l.files, full)
 	if err != nil {
@@ -225,7 +233,8 @@ func (l *loader) readInst(full, class string) (instFile, error) {
 	return file, nil
 }
 
-// reads the .inst.json of a script or folder, which may not have one
+// readOptionalInst reads the .inst.json file at full for a script or a folder.
+// It returns an empty instFile if the file does not exist, is not a regular file, or matches ignore.paths.
 func (l *loader) readOptionalInst(full, class string) (instFile, error) {
 	ignored, err := l.pathIgnored(full)
 	if err != nil || ignored {

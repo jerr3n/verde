@@ -17,7 +17,7 @@ import (
 const debounce = 100 * time.Millisecond
 
 func addDirs(w *fsnotify.Watcher, cfg *config.Cfg, logger *zap.Logger) {
-	for _, entry := range cfg.Sync {
+	for _, entry := range cfg.Sync.Instances {
 		root := filepath.Join(cfg.Root, entry.Path)
 		filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
@@ -41,7 +41,7 @@ func Run(ctx context.Context, cfg *config.Cfg, changed func(), logger *zap.Logge
 	defer w.Close()
 	// A folder can only be watched if it exists. Studio can create one later, and with
 	// no watch on it, there'd be no event to notice it by.
-	for _, entry := range cfg.Sync {
+	for _, entry := range cfg.Sync.Instances {
 		if err := os.MkdirAll(filepath.Join(cfg.Root, entry.Path), 0o755); err != nil {
 			logger.Warn("create sync folder", zap.String("path", entry.Path), zap.Error(err))
 		}

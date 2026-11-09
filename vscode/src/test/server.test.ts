@@ -81,7 +81,7 @@ test("the server starts, reports its address, and stops", async () => {
 
 test("a bad config fails with the server's own message", async () => {
   const { dir } = await makeProject({});
-  fs.writeFileSync(path.join(dir, "project.yml"), "version: 99\nserve: {port: 1234}\nsync: []\n");
+  fs.writeFileSync(path.join(dir, "project.yml"), "version: 99\nserve: {port: 1234}\nsync: {instances: []}\n");
   const { server } = startServer(dir);
   const state = await waitFor("the server to fail", () => server.state.kind === "failed" && server.state);
   assert.match((state as { message: string }).message, /version/);

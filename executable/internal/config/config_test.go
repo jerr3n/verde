@@ -13,8 +13,9 @@ import (
 
 const validSync = `
 sync:
-  - instance: Workspace
-    path: src/workspace
+  instances:
+    - instance: Workspace
+      path: src/workspace
 `
 
 func writeConfig(t *testing.T, body string) string {
@@ -39,7 +40,7 @@ func TestLoadSample(t *testing.T) {
 	if got, want := cfg.Conflicts.OnConnect, OnConnectDisk; got != want {
 		t.Errorf("OnConnect = %q, want %q", got, want)
 	}
-	if got, want := len(cfg.Sync), 8; got != want {
+	if got, want := len(cfg.Sync.Instances), 8; got != want {
 		t.Errorf("len(Sync) = %d, want %d", got, want)
 	}
 	if got, want := cfg.Serve.PlaceIds, int64(1234567890); len(got) != 1 || got[0] != want {
@@ -75,12 +76,13 @@ func TestLoadCleansPaths(t *testing.T) {
 	cfg, err := Load(writeConfig(t, `
 serve: {port: 1234}
 sync:
-  - {instance: Workspace, path: ./src/a/../workspace/}
+  instances:
+    - {instance: Workspace, path: ./src/a/../workspace/}
 `))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got, want := cfg.Sync[0].Path, filepath.Join("src", "workspace"); got != want {
+	if got, want := cfg.Sync.Instances[0].Path, filepath.Join("src", "workspace"); got != want {
 		t.Errorf("Path = %q, want %q", got, want)
 	}
 }
@@ -89,8 +91,9 @@ func TestLoadAllowsSimilarNames(t *testing.T) {
 	_, err := Load(writeConfig(t, `
 serve: {port: 1234}
 sync:
-  - {instance: StarterPlayer/A, path: src/a}
-  - {instance: StarterPlayer/AB, path: src/ab}
+  instances:
+    - {instance: StarterPlayer/A, path: src/a}
+    - {instance: StarterPlayer/AB, path: src/ab}
 `))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -136,22 +139,22 @@ func TestLoadRejects(t *testing.T) {
 		{"port too low", "serve: {port: -1}\n" + validSync, "serve.port"},
 		{"port too high", "serve: {port: 70000}\n" + validSync, "serve.port"},
 		{"bad onConnect", port + "conflicts: {onConnect: banana}\n" + validSync, "conflicts.onConnect"},
-		{"no sync", port, "sync: need at least one"},
-		{"empty instance", port + "sync:\n  - {path: src/a}\n", "sync[0].instance"},
-		{"instance with empty segment", port + "sync:\n  - {instance: A//B, path: src/a}\n", "sync[0].instance"},
-		{"instance with trailing slash", port + "sync:\n  - {instance: A/, path: src/a}\n", "sync[0].instance"},
-		{"empty path", port + "sync:\n  - {instance: A}\n", "sync[0].path"},
-		{"path outside project", port + "sync:\n  - {instance: A, path: ../../outside}\n", "outside the project"},
-		{"path sneaking outside", port + "sync:\n  - {instance: A, path: src/../../outside}\n", "outside the project"},
-		{"absolute path", port + "sync:\n  - {instance: A, path: /etc}\n", "outside the project"},
-		{"project root", port + "sync:\n  - {instance: A, path: ./}\n", "project root"},
-		{"duplicate instance", port + "sync:\n  - {instance: A, path: x}\n  - {instance: A, path: y}\n", "duplicate"},
-		{"duplicate path", port + "sync:\n  - {instance: A, path: x}\n  - {instance: B, path: x}\n", "duplicate"},
-		{"duplicate path spelled differently", port + "sync:\n  - {instance: A, path: x}\n  - {instance: B, path: ./x/}\n", "duplicate"},
-		{"nested instance", port + "sync:\n  - {instance: A, path: x}\n  - {instance: A/B, path: y}\n", "overlap"},
-		{"nested instance, inner first", port + "sync:\n  - {instance: A/B, path: x}\n  - {instance: A, path: y}\n", "overlap"},
-		{"nested path", port + "sync:\n  - {instance: A, path: src}\n  - {instance: B, path: src/x}\n", "overlap"},
-		{"nested path, inner first", port + "sync:\n  - {instance: A, path: src/x}\n  - {instance: B, path: src}\n", "overlap"},
+		{"no sync", port, "sync.instances: need at least one"},
+		{"empty instance", port + "sync:\n  instances:\n    - {path: src/a}\n", "sync.instances[0].instance"},
+		{"instance with empty segment", port + "sync:\n  instances:\n    - {instance: A//B, path: src/a}\n", "sync.instances[0].instance"},
+		{"instance with trailing slash", port + "sync:\n  instances:\n    - {instance: A/, path: src/a}\n", "sync.instances[0].instance"},
+		{"empty path", port + "sync:\n  instances:\n    - {instance: A}\n", "sync.instances[0].path"},
+		{"path outside project", port + "sync:\n  instances:\n    - {instance: A, path: ../../outside}\n", "outside the project"},
+		{"path sneaking outside", port + "sync:\n  instances:\n    - {instance: A, path: src/../../outside}\n", "outside the project"},
+		{"absolute path", port + "sync:\n  instances:\n    - {instance: A, path: /etc}\n", "outside the project"},
+		{"project root", port + "sync:\n  instances:\n    - {instance: A, path: ./}\n", "project root"},
+		{"duplicate instance", port + "sync:\n  instances:\n    - {instance: A, path: x}\n    - {instance: A, path: y}\n", "duplicate"},
+		{"duplicate path", port + "sync:\n  instances:\n    - {instance: A, path: x}\n    - {instance: B, path: x}\n", "duplicate"},
+		{"duplicate path spelled differently", port + "sync:\n  instances:\n    - {instance: A, path: x}\n    - {instance: B, path: ./x/}\n", "duplicate"},
+		{"nested instance", port + "sync:\n  instances:\n    - {instance: A, path: x}\n    - {instance: A/B, path: y}\n", "overlap"},
+		{"nested instance, inner first", port + "sync:\n  instances:\n    - {instance: A/B, path: x}\n    - {instance: A, path: y}\n", "overlap"},
+		{"nested path", port + "sync:\n  instances:\n    - {instance: A, path: src}\n    - {instance: B, path: src/x}\n", "overlap"},
+		{"nested path, inner first", port + "sync:\n  instances:\n    - {instance: A, path: src/x}\n    - {instance: B, path: src}\n", "overlap"},
 	}
 
 	for _, tt := range tests {

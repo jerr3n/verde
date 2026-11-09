@@ -257,7 +257,7 @@ func TestApplyMoves(t *testing.T) {
 }
 
 func TestApplyMoveBetweenMounts(t *testing.T) {
-	f := newFixture(t, map[string]string{"one/Main.luau": "x"}, "sync:\n  - {instance: A, path: one}\n  - {instance: B, path: two}\n")
+	f := newFixture(t, map[string]string{"one/Main.luau": "x"}, "sync:\n  instances:\n    - {instance: A, path: one}\n    - {instance: B, path: two}\n")
 	f.apply(protocol.Patch{Updated: []protocol.Update{{ID: f.ref("game/A/Main"), Parent: f.ref("game/B")}}})
 	f.assertFile("two/Main.luau", "x")
 	f.assertMissing("one/Main.luau")
@@ -585,7 +585,7 @@ func TestApplyEmptyNameStaysInTree(t *testing.T) {
 }
 
 func TestApplyProtectsMounts(t *testing.T) {
-	yml := "sync:\n  - {instance: P/S, path: s}\n"
+	yml := "sync:\n  instances:\n    - {instance: P/S, path: s}\n"
 	f := newFixture(t, map[string]string{"s/Main.luau": "main"}, yml)
 	game, parent, mount := f.tree.Root(), f.ref("game/P"), f.ref("game/P/S")
 	main := f.ref("game/P/S/Main")

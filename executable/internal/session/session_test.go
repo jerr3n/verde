@@ -45,7 +45,7 @@ func startServer(t *testing.T, files map[string]string) *server {
 		}
 	}
 	configPath := filepath.Join(dir, config.DefaultPath)
-	yml := "serve: {port: 1234}\nsync:\n  - {instance: W, path: src}\n"
+	yml := "serve: {port: 1234}\nsync:\n  instances:\n    - {instance: W, path: src}\n"
 	if err := os.WriteFile(configPath, []byte(yml), 0o644); err != nil {
 		t.Fatal(err)
 	}

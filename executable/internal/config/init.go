@@ -22,22 +22,23 @@ serve:
   port: 45678
   placeIds: [] # places allowed to connect, or empty to allow any place
 sync:
-  - instance: ReplicatedStorage
-    path: src/shared
-  - instance: ServerScriptService
-    path: src/server
-  - instance: StarterPlayer/StarterPlayerScripts
-    path: src/local
-  - instance: StarterGui
-    path: src/gui
-  - instance: Workspace
-    path: src/workspace
-  - instance: ReplicatedFirst
-    path: src/first
-  - instance: ServerStorage
-    path: src/storage
-  - instance: Lighting
-    path: src/lighting
+  instances:
+    - instance: ReplicatedStorage
+      path: src/shared
+    - instance: ServerScriptService
+      path: src/server
+    - instance: StarterPlayer/StarterPlayerScripts
+      path: src/local
+    - instance: StarterGui
+      path: src/gui
+    - instance: Workspace
+      path: src/workspace
+    - instance: ReplicatedFirst
+      path: src/first
+    - instance: ServerStorage
+      path: src/storage
+    - instance: Lighting
+      path: src/lighting
 ignore:
   paths: ["**/*.tmp", "**/.DS_Store"]
   instances: ["Workspace/Camera", "Workspace/Terrain"]
@@ -74,7 +75,7 @@ func makeSyncFolders(path string) error {
 	}
 	defer root.Close()
 
-	for _, entry := range cfg.Sync {
+	for _, entry := range cfg.Sync.Instances {
 		if err := root.MkdirAll(entry.Path, 0o755); err != nil {
 			return fmt.Errorf("create %s: %w", entry.Path, err)
 		}

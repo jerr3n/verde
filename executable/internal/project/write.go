@@ -94,14 +94,14 @@ func newWriter(cfg *config.Cfg, t *tree.Tree, mounts []protocol.Mount, root *os.
 		root:     root,
 		scan:     &loader{cfg: cfg, files: root.FS()},
 		mounts:   make(map[protocol.Ref]bool, len(mounts)),
-		syncDirs: make(map[protocol.Ref]string, len(cfg.Sync)),
+		syncDirs: make(map[protocol.Ref]string, len(cfg.Sync.Instances)),
 	}
 	for _, mount := range mounts {
 		w.mounts[mount.ID] = true
 		if !mount.Sync {
 			continue
 		}
-		for _, entry := range cfg.Sync {
+		for _, entry := range cfg.Sync.Instances {
 			if entry.Instance == strings.Join(mount.Path, "/") {
 				w.syncDirs[mount.ID] = filepath.ToSlash(entry.Path)
 			}

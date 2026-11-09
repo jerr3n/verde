@@ -27,22 +27,23 @@ serve:
   port: 45678
   placeIds: [1234567890]
 sync:
-  - instance: ReplicatedStorage
-    path: src/shared
-  - instance: ServerScriptService
-    path: src/server
-  - instance: StarterPlayer/StarterPlayerScripts
-    path: src/local
-  - instance: StarterGui
-    path: src/gui
-  - instance: Workspace
-    path: src/workspace
-  - instance: ReplicatedFirst
-    path: src/first
-  - instance: ServerStorage
-    path: src/storage
-  - instance: Lighting
-    path: src/lighting
+  instances:
+    - instance: ReplicatedStorage
+      path: src/shared
+    - instance: ServerScriptService
+      path: src/server
+    - instance: StarterPlayer/StarterPlayerScripts
+      path: src/local
+    - instance: StarterGui
+      path: src/gui
+    - instance: Workspace
+      path: src/workspace
+    - instance: ReplicatedFirst
+      path: src/first
+    - instance: ServerStorage
+      path: src/storage
+    - instance: Lighting
+      path: src/lighting
 ignore:
   paths: ["**\/*.tmp", "**\/.DS_Store"]
   instances: ["Workspace/Camera", "Workspace/Terrain"]
@@ -86,7 +87,9 @@ type Cfg struct {
 		Port     int     `yaml:"port"`
 		PlaceIds []int64 `yaml:"placeIds"`
 	} `yaml:"serve"`
-	Sync   []SyncInstance `yaml:"sync"`
+	Sync struct {
+		Instances []SyncInstance `yaml:"instances"`
+	} `yaml:"sync"`
 	Ignore struct {
 		Paths     []string `yaml:"paths"`
 		Instances []string `yaml:"instances"`
@@ -160,28 +163,28 @@ func (c *Cfg) validate() error {
 	default:
 		return fmt.Errorf("conflicts.onConnect: %q is not disk, studio or interactive", c.Conflicts.OnConnect)
 	}
-	if len(c.Sync) == 0 {
-		return errors.New("sync: need at least one entry")
+	if len(c.Sync.Instances) == 0 {
+		return errors.New("sync.instances: need at least one entry")
 	}
 
-	for i := range c.Sync {
-		entry := &c.Sync[i]
+	for i := range c.Sync.Instances {
+		entry := &c.Sync.Instances[i]
 
 		if err := validateInstance(entry.Instance); err != nil {
-			return fmt.Errorf("sync[%d].instance: %w", i, err)
+			return fmt.Errorf("sync.instances[%d].instance: %w", i, err)
 		}
 		cleaned, err := cleanPath(entry.Path)
 		if err != nil {
-			return fmt.Errorf("sync[%d].path: %w", i, err)
+			return fmt.Errorf("sync.instances[%d].path: %w", i, err)
 		}
 		entry.Path = cleaned
 
-		for j, earlier := range c.Sync[:i] {
+		for j, earlier := range c.Sync.Instances[:i] {
 			if err := checkOverlap(entry.Instance, earlier.Instance, "/"); err != nil {
-				return fmt.Errorf("sync[%d].instance: %w with sync[%d]", i, err, j)
+				return fmt.Errorf("sync.instances[%d].instance: %w with sync.instances[%d]", i, err, j)
 			}
 			if err := checkOverlap(entry.Path, earlier.Path, string(filepath.Separator)); err != nil {
-				return fmt.Errorf("sync[%d].path: %w with sync[%d]", i, err, j)
+				return fmt.Errorf("sync.instances[%d].path: %w with sync.instances[%d]", i, err, j)
 			}
 		}
 	}

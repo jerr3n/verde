@@ -24,7 +24,7 @@ export async function makeProject(files: Record<string, string>, extra = ""): Pr
   const port = await freePort();
   fs.writeFileSync(
     path.join(dir, "project.yml"),
-    `version: 0\nname: test\nserve:\n  port: ${port}\n${extra}sync:\n  - instance: Workspace\n    path: src/workspace\n  - instance: StarterPlayer/StarterPlayerScripts\n    path: src/local\n`,
+    `version: 0\nname: test\nserve:\n  port: ${port}\n${extra}sync:\n  instances:\n    - instance: Workspace\n      path: src/workspace\n    - instance: StarterPlayer/StarterPlayerScripts\n      path: src/local\n`,
   );
   for (const [name, text] of Object.entries(files)) {
     const full = path.join(dir, name);

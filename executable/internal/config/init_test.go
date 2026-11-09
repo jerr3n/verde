@@ -35,10 +35,10 @@ func TestInitWritesAValidConfig(t *testing.T) {
 	if got := cfg.Serve.PlaceIds; len(got) != 0 {
 		t.Errorf("PlaceIds = %v, want none, so any place can connect", got)
 	}
-	if got, want := len(cfg.Sync), 8; got != want {
+	if got, want := len(cfg.Sync.Instances), 8; got != want {
 		t.Errorf("len(Sync) = %d, want %d", got, want)
 	}
-	for _, entry := range cfg.Sync {
+	for _, entry := range cfg.Sync.Instances {
 		info, err := os.Stat(filepath.Join(dir, entry.Path))
 		if err != nil {
 			t.Errorf("sync folder: %v", err)

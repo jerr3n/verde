@@ -322,10 +322,11 @@ function Migration.convert(game, project, root: string)
 		"  port: 45678",
 		`  placeIds: {json(project.servePlaceIds or {})}`,
 		"sync:",
+		"  instances:",
 	}
 	for _, entry in sync do
-		table.insert(lines, `  - instance: {json(entry.instance)}`)
-		table.insert(lines, `    path: {json(entry.path)}`)
+		table.insert(lines, `    - instance: {json(entry.instance)}`)
+		table.insert(lines, `      path: {json(entry.path)}`)
 	end
 	-- Use literal [] rather than an empty Luau table (which serializes as {}).
 	for i, line in lines do

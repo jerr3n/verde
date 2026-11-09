@@ -65,7 +65,7 @@ func sortedPaths(instances map[string]protocol.Instance) []string {
 	return out
 }
 
-const syncW = "sync:\n  - {instance: W, path: s}\n"
+const syncW = "sync:\n  instances:\n    - {instance: W, path: s}\n"
 
 func TestClassify(t *testing.T) {
 	tests := []struct {
@@ -201,9 +201,10 @@ func TestLoadListsParentsFirstInSortedOrder(t *testing.T) {
 func TestMounts(t *testing.T) {
 	tr, mounts, err := Load(newConfig(t, nil, `
 sync:
-  - {instance: StarterPlayer/StarterPlayerScripts, path: a}
-  - {instance: StarterPlayer/StarterCharacterScripts, path: b}
-  - {instance: Workspace, path: c}
+  instances:
+    - {instance: StarterPlayer/StarterPlayerScripts, path: a}
+    - {instance: StarterPlayer/StarterCharacterScripts, path: b}
+    - {instance: Workspace, path: c}
 `))
 	if err != nil {
 		t.Fatal(err)
@@ -257,7 +258,7 @@ func TestSampleConfig(t *testing.T) {
 	}
 
 	// The DataModel, StarterPlayer, and one for each of the sample's sync entries.
-	want := 2 + len(cfg.Sync)
+	want := 2 + len(cfg.Sync.Instances)
 	if len(mounts) != want || tr.Len() != want {
 		t.Errorf("%d mounts and %d instances, want %d of each", len(mounts), tr.Len(), want)
 	}
@@ -411,7 +412,7 @@ func TestSymlinksInsideAreSkipped(t *testing.T) {
 }
 
 func TestSymlinkedSyncPathOutsideIsRejected(t *testing.T) {
-	cfg := newConfig(t, nil, "sync:\n  - {instance: W, path: link/inner}\n")
+	cfg := newConfig(t, nil, "sync:\n  instances:\n    - {instance: W, path: link/inner}\n")
 	if err := os.Symlink(t.TempDir(), filepath.Join(cfg.Root, "link")); err != nil {
 		t.Fatal(err)
 	}

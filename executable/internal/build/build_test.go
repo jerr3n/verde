@@ -635,7 +635,7 @@ func closeEnough(a, b any) bool {
 func TestBuildsAProjectFromDisk(t *testing.T) {
 	dir := t.TempDir()
 	files := map[string]string{
-		"project.yml": "serve: {port: 1234}\nsync:\n  - instance: Workspace\n    path: src/ws\n  - instance: StarterPlayer/StarterPlayerScripts\n    path: src/client\n",
+		"project.yml": "serve: {port: 1234}\nsync:\n  instances:\n    - instance: Workspace\n      path: src/ws\n    - instance: StarterPlayer/StarterPlayerScripts\n      path: src/client\n",
 		"src/ws/Lamp.Part.inst.json": `{"props": {
 "Anchored": {"t":"Bool","v":true},
 "Size": {"t":"Vector3","v":[4,1,2]}

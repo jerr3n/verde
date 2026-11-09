@@ -7,8 +7,9 @@ serve:
   port: 45679
   placeIds: []
 sync:
-  - instance: ServerStorage
-    path: src
+  instances:
+    - instance: ServerStorage
+      path: src
 ignore:
   paths: ["**/*.tmp", "**/.DS_Store"]
 conflicts:

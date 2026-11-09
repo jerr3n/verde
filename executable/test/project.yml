@@ -7,22 +7,23 @@ serve:
   port: 45678
   placeIds: [1234567890]
 sync:
-  - instance: ReplicatedStorage
-    path: src/shared
-  - instance: ServerScriptService
-    path: src/server
-  - instance: StarterPlayer/StarterPlayerScripts
-    path: src/local
-  - instance: StarterGui
-    path: src/gui
-  - instance: Workspace
-    path: src/workspace
-  - instance: ReplicatedFirst
-    path: src/first
-  - instance: ServerStorage
-    path: src/storage
-  - instance: Lighting
-    path: src/lighting
+  instances:
+    - instance: ReplicatedStorage
+      path: src/shared
+    - instance: ServerScriptService
+      path: src/server
+    - instance: StarterPlayer/StarterPlayerScripts
+      path: src/local
+    - instance: StarterGui
+      path: src/gui
+    - instance: Workspace
+      path: src/workspace
+    - instance: ReplicatedFirst
+      path: src/first
+    - instance: ServerStorage
+      path: src/storage
+    - instance: Lighting
+      path: src/lighting
 ignore:
   paths: ["**/*.tmp", "**/.DS_Store"]
   instances: ["Workspace/Camera", "Workspace/Terrain"]

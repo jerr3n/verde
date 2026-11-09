@@ -49,7 +49,7 @@ func Load(cfg *config.Cfg) (*tree.Tree, []protocol.Mount, error) {
 		ids:    map[protocol.Ref]string{},
 	}
 
-	for _, entry := range cfg.Sync {
+	for _, entry := range cfg.Sync.Instances {
 		mount, err := l.addMount(entry.Instance)
 		if err != nil {
 			return nil, nil, fmt.Errorf("sync %s: %w", entry.Instance, err)

@@ -19,6 +19,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// version is the CLI version. Release builds can set it with -ldflags "-X main.version=...".
+var version = "0.0.1"
+
 // serve loads the project and starts the sync session and the disk watcher.
 // It then accepts WebSocket connections on cfg.Addr() and blocks until the HTTP server stops.
 func serve(ctx context.Context, logger *zap.Logger, cfg *config.Cfg) error {
@@ -74,6 +77,7 @@ func main() {
 	defer logger.Sync()
 	var cmd = &cli.Command{
 		Name:                  "verde",
+		Version:               version,
 		Description:           "Multi-directional sync between Roblox and Disk.",
 		Usage:                 "Multi-directional sync between Roblox and Disk.",
 		EnableShellCompletion: true,
